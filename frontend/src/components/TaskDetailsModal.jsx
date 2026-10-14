@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import api from "../api/client";
 import TaskComments from "./TaskComments";
+import TaskActivityTimeline from "./TaskActivityTimeline";
 
 const statuses = [
   { value: "backlog", label: "Backlog" },
@@ -53,6 +54,7 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
 
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [activityRefreshToken, setActivityRefreshToken] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -374,7 +376,9 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
             </button>
           </div>
         </form>
-        <TaskComments workspaceId={workspaceId} projectId={projectId} taskId={task._id} />
+        <TaskActivityTimeline workspaceId={workspaceId} projectId={projectId} taskId={task._id} refreshToken={activityRefreshToken}/>
+
+        <TaskComments workspaceId={workspaceId} projectId={projectId} taskId={task._id} onCommentAdded={() => setActivityRefreshToken((token) => token + 1) }/>
       </section>
     </div>
   );

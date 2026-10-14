@@ -16,7 +16,7 @@ function formatCommentDate(date) {
   });
 }
 
-function TaskComments({ workspaceId, projectId, taskId }) {
+function TaskComments({ workspaceId, projectId, taskId,onCommentAdded }) {
   const [comments, setComments] = useState([]);
   const [body, setBody] = useState("");
   const [loading, setLoading] = useState(true);
@@ -79,11 +79,12 @@ function TaskComments({ workspaceId, projectId, taskId }) {
       );
 
       setComments((currentComments) => [
-        ...currentComments,
-        response.data.comment,
+      ...currentComments,
+      response.data.comment,
       ]);
 
       setBody("");
+      onCommentAdded?.();
     } catch (err) {
       const data = err.response?.data;
 
