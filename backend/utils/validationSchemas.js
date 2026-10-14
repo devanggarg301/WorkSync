@@ -64,4 +64,8 @@ const taskMoveSchema = Joi.object({
   position: Joi.number().integer().min(0).required(),
 });
 
-module.exports = {registerSchema,loginSchema,createWorkspaceSchema,updateWorkspaceSchema,updateWorkspaceMemberRoleSchema,addWorkspaceMemberSchema,createProjectSchema,createTaskSchema,updateTaskSchema,taskMoveSchema };
+const taskCommentSchema = Joi.object({
+  body: Joi.string().trim().min(1).max(3000).required(),
+});
+
+module.exports = {registerSchema,loginSchema,createWorkspaceSchema,updateWorkspaceSchema,updateWorkspaceMemberRoleSchema,addWorkspaceMemberSchema,createProjectSchema,createTaskSchema,updateTaskSchema,taskMoveSchema,taskCommentSchema };
