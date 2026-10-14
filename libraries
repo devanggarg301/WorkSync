@@ -1,0 +1,10 @@
+express
+cors
+dotenv
+mongoose
+joi
+brcyptjs
+jsonwebtoken
+cookie-parser
+
+@dnd-kit/core @dnd-kit/sortable @dnd-kit/utilities
