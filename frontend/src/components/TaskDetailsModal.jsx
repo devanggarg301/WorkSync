@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import api from "../api/client";
+import TaskComments from "./TaskComments";
 
 const statuses = [
   { value: "backlog", label: "Backlog" },
@@ -148,7 +149,7 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="task-details-title"
-        className="my-8 w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl sm:p-8"
+        className="my-8 max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl sm:p-8"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -373,6 +374,7 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
             </button>
           </div>
         </form>
+        <TaskComments workspaceId={workspaceId} projectId={projectId} taskId={task._id} />
       </section>
     </div>
   );
