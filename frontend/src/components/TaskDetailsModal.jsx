@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { Trash2, X } from "lucide-react";
 import api from "../api/client";
 import TaskComments from "./TaskComments";
 import TaskActivityTimeline from "./TaskActivityTimeline";
+import { createPortal } from "react-dom";
 
 const statuses = [
   { value: "backlog", label: "Backlog" },
@@ -54,6 +55,9 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
 
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  
   const [activityRefreshToken, setActivityRefreshToken] = useState(0);
 
   useEffect(() => {
@@ -85,6 +89,33 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
       active = false;
     };
   }, [workspaceId]);
+
+  const handleConfirmDelete = async () => {
+    setError("");
+    setDeleting(true);
+
+    try {
+      await api.delete(
+        `/workspaces/${workspaceId}/projects/${projectId}/tasks/${task._id}`
+      );
+
+      await onUpdated();
+      onClose();
+    } catch (err) {
+      const data = err.response?.data;
+      setShowDeleteConfirmation(false);
+
+      setError(
+        data?.errors?.join(", ") ||
+          data?.message ||
+          "Unable to delete task. Please try again."
+      );
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const isBusy = saving || deleting;
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -141,13 +172,15 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
       onMouseDown={(event) => {
         if (
           event.target === event.currentTarget &&
-          !saving
+          !isBusy &&
+          !showDeleteConfirmation
         ) {
           onClose();
         }
       }}
     >
       <section
+        aria-hidden={showDeleteConfirmation}
         role="dialog"
         aria-modal="true"
         aria-labelledby="task-details-title"
@@ -171,7 +204,7 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
             type="button"
             aria-label="Close dialog"
             onClick={onClose}
-            disabled={saving}
+            disabled={isBusy}
             className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
           >
             <X size={20} />
@@ -213,7 +246,7 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
               minLength={2}
               maxLength={200}
               required
-              disabled={saving}
+              disabled={isBusy}
               className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
             />
           </div>
@@ -232,7 +265,7 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
               onChange={(event) => setDescription(event.target.value)}
               maxLength={5000}
               rows={4}
-              disabled={saving}
+              disabled={isBusy}
               className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
             />
           </div>
@@ -250,7 +283,7 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
                 id="details-status"
                 value={status}
                 onChange={(event) => setStatus(event.target.value)}
-                disabled={saving}
+                disabled={isBusy}
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5"
               >
                 {statuses.map((item) => (
@@ -273,7 +306,7 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
                 id="details-priority"
                 value={priority}
                 onChange={(event) => setPriority(event.target.value)}
-                disabled={saving}
+                disabled={isBusy}
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5"
               >
                 {priorities.map((item) => (
@@ -296,7 +329,7 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
                 id="details-assignee"
                 value={assigneeId}
                 onChange={(event) => setAssigneeId(event.target.value)}
-                disabled={saving || membersLoading || Boolean(membersError)}
+                disabled={isBusy || membersLoading || Boolean(membersError)}
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 disabled:bg-slate-50"
               >
                 <option value="">Unassigned</option>
@@ -329,7 +362,7 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
                 type="date"
                 value={dueDate}
                 onChange={(event) => setDueDate(event.target.value)}
-                disabled={saving}
+                disabled={isBusy}
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5"
               />
             </div>
@@ -347,7 +380,7 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
               id="details-labels"
               value={labelsInput}
               onChange={(event) => setLabelsInput(event.target.value)}
-              disabled={saving}
+              disabled={isBusy}
               placeholder="frontend, bug, documentation"
               className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-indigo-500"
             />
@@ -357,29 +390,110 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
             </p>
           </div>
 
-          <div className="flex justify-end gap-3 border-t border-slate-100 pt-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5">
             <button
               type="button"
-              onClick={onClose}
-              disabled={saving}
-              className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+              onClick={() => setShowDeleteConfirmation(true)}
+              disabled={isBusy}
+              className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Cancel
+              <Trash2 size={16} />
+              {deleting ? "Deleting..." : "Delete task"}
             </button>
 
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving ? "Saving..." : "Save changes"}
-            </button>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={isBusy}
+                className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="submit"
+                disabled={isBusy}
+                className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {saving ? "Saving..." : "Save changes"}
+              </button>
+            </div>
           </div>
         </form>
         <TaskActivityTimeline workspaceId={workspaceId} projectId={projectId} taskId={task._id} refreshToken={activityRefreshToken}/>
 
         <TaskComments workspaceId={workspaceId} projectId={projectId} taskId={task._id} onCommentAdded={() => setActivityRefreshToken((token) => token + 1) }/>
       </section>
+
+      
+{showDeleteConfirmation &&
+  createPortal(
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/60 p-4"
+      style={{ zIndex: 9999 }}
+      onMouseDown={(event) => {
+        if (
+          event.target === event.currentTarget &&
+          !deleting
+        ) {
+          setShowDeleteConfirmation(false);
+        }
+      }}
+    >
+      <section
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="delete-task-title"
+        aria-describedby="delete-task-description"
+        className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+      >
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-600">
+          <Trash2 size={22} />
+        </div>
+
+        <h3
+          id="delete-task-title"
+          className="mt-4 text-lg font-bold text-slate-900"
+        >
+          Delete this task?
+        </h3>
+
+        <p
+          id="delete-task-description"
+          className="mt-2 text-sm leading-6 text-slate-600"
+        >
+          You are about to permanently delete{" "}
+          <span className="font-semibold text-slate-900">
+            {task.title}
+          </span>
+          . This action cannot be undone.
+        </p>
+
+        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={() => setShowDeleteConfirmation(false)}
+            disabled={deleting}
+            className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:w-auto"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            onClick={handleConfirmDelete}
+            disabled={deleting}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+          >
+            <Trash2 size={16} />
+            {deleting ? "Deleting..." : "Delete task"}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body
+  )}
     </div>
   );
 }
