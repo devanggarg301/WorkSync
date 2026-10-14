@@ -11,6 +11,7 @@ import api from "../api/client";
 import KanbanColumn from "../components/KanbanColumn";
 import TaskCard from "../components/TaskCard";
 import CreateTaskModal from "../components/CreateTaskModal";
+import TaskDetailsModal from "../components/TaskDetailsModal";
 
 const columns = [
   { id: "backlog", title: "Backlog" },
@@ -46,6 +47,7 @@ function ProjectPage() {
 
   const [activeTaskId, setActiveTaskId] = useState(null);
   const [movingTaskId, setMovingTaskId] = useState(null);
+  const [selectedTask, setSelectedTask] = useState(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -508,11 +510,12 @@ function ProjectPage() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
             {columns.map((column) => (
               <KanbanColumn
-                key={column.id}
-                column={column}
-                movingTaskId={movingTaskId}
-                tasks={tasksByStatus[column.id]}
-              />
+              key={column.id}
+              column={column}
+              movingTaskId={movingTaskId}
+              tasks={tasksByStatus[column.id]}
+              onOpenTask={setSelectedTask}
+            />
             ))}
           </div>
 
@@ -526,13 +529,22 @@ function ProjectPage() {
         </DndContext>
       </section>
 
-      {/* Create task modal */}
       {showCreateTaskModal && (
         <CreateTaskModal
           workspaceId={workspaceId}
           projectId={projectId}
           onClose={() => setShowCreateTaskModal(false)}
           onCreated={refreshTasks}
+        />
+      )}
+      {selectedTask && (
+        <TaskDetailsModal
+          key={selectedTask._id}
+          task={selectedTask}
+          workspaceId={workspaceId}
+          projectId={projectId}
+          onClose={() => setSelectedTask(null)}
+          onUpdated={refreshTasks}
         />
       )}
     </main>

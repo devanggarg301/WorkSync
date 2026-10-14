@@ -3,15 +3,8 @@ import { CSS } from "@dnd-kit/utilities";
 
 import TaskCard from "./TaskCard";
 
-function SortableTaskCard({ task, disabled = false }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({
+function SortableTaskCard({ task, disabled = false,onOpen }) {
+  const {attributes,listeners,setNodeRef,transform,transition,isDragging,} = useSortable({
     id: task._id,
     disabled,
   });
@@ -31,7 +24,7 @@ function SortableTaskCard({ task, disabled = false }) {
       {...listeners}
       className="cursor-grab rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 active:cursor-grabbing"
     >
-      <TaskCard task={task} />
+      <TaskCard task={task} onOpen={onOpen} />
     </div>
   );
 }

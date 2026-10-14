@@ -7,7 +7,7 @@ import { useDroppable } from "@dnd-kit/core";
 
 import SortableTaskCard from "./SortableTaskCard";
 
-function KanbanColumn({ column, tasks, movingTaskId }) {
+function KanbanColumn({ column, tasks, movingTaskId,onOpenTask }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `column:${column.id}`,
     data: {
@@ -45,6 +45,7 @@ function KanbanColumn({ column, tasks, movingTaskId }) {
               key={task._id}
               task={task}
               disabled={Boolean(movingTaskId)}
+              onOpen={() => onOpenTask(task)}
             />
           ))}
 

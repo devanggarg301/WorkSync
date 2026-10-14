@@ -8,7 +8,7 @@ const priorityStyles = {
   urgent: "bg-red-50 text-red-700",
 };
 
-function TaskCard({ task }) {
+function TaskCard({ task, onOpen }) {
   const formattedDueDate = task.dueDate
     ? new Date(task.dueDate).toLocaleDateString()
     : null;
@@ -17,7 +17,13 @@ function TaskCard({ task }) {
     <article className="rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm transition hover:border-indigo-200">
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm font-semibold leading-5 text-slate-900">
-          {task.title}
+          <button
+            type="button"
+            onClick={onOpen}
+            className="text-left text-sm font-semibold leading-5 text-slate-900 hover:text-indigo-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            >
+            {task.title}
+          </button>
         </p>
 
         <span
