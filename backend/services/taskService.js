@@ -1,8 +1,9 @@
-
+const mongoose = require("mongoose")
 const Project = require("../models/Project");
 const Task = require("../models/Task");
 const WorkspaceMember = require("../models/WorkspaceMember");
-const mongoose = require("mongoose");
+
+const {recordTaskActivity} = require("./taskActivityService");
 
 const createTaskInProject = async (data,workspaceId,projectId,userId) => {
   const project = await Project.findOne({
@@ -16,14 +17,13 @@ const createTaskInProject = async (data,workspaceId,projectId,userId) => {
 
   const assigneeId = data.assigneeId || null;
 
-  // An assignee must be a member of the same workspace.
   if (assigneeId) {
-    const assigneeMembership = await WorkspaceMember.findOne({
+    const membership = await WorkspaceMember.findOne({
       workspaceId,
       userId: assigneeId,
     }).select("_id");
 
-    if (!assigneeMembership) {
+    if (!membership) {
       return { status: "assignee_not_member" };
     }
   }
@@ -38,7 +38,9 @@ const createTaskInProject = async (data,workspaceId,projectId,userId) => {
     .sort({ position: -1 })
     .select("position");
 
-  const position = lastTask ? lastTask.position + 1 : 0;
+  const position = lastTask
+    ? lastTask.position + 1
+    : 0;
 
   const task = await Task.create({
     workspaceId,
@@ -65,14 +67,22 @@ const createTaskInProject = async (data,workspaceId,projectId,userId) => {
     },
   ]);
 
+  await recordTaskActivity({
+    workspaceId,
+    projectId,
+    taskId: task._id,
+    actorId: userId,
+    action: "task_created",
+    message: `created task "${task.title}"`,
+  });
+
   return {
     status: "created",
     task,
   };
 };
 
-
-const getTasksByProject = async (workspaceId, projectId) => {
+const getTasksByProject = async (workspaceId,projectId) => {
   const project = await Project.findOne({
     _id: projectId,
     workspaceId,
@@ -102,7 +112,7 @@ const getTasksByProject = async (workspaceId, projectId) => {
   };
 };
 
-const updateTaskInProject = async (data,workspaceId,projectId,taskId) => {
+const updateTaskInProject = async (data,workspaceId,projectId,taskId,actorId) => {
   const project = await Project.findOne({
     _id: projectId,
     workspaceId,
@@ -112,17 +122,20 @@ const updateTaskInProject = async (data,workspaceId,projectId,taskId) => {
     return { status: "project_not_found" };
   }
 
+  
   const task = await Task.findOne({
     _id: taskId,
     workspaceId,
     projectId,
-  }).select("_id status position");
+  }).select(
+    "_id title description status priority assignee dueDate labels position"
+  );
 
   if (!task) {
     return { status: "task_not_found" };
   }
 
-  if (data.assigneeId && data.assigneeId !== null) {
+  if (data.assigneeId) {
     const membership = await WorkspaceMember.findOne({
       workspaceId,
       userId: data.assigneeId,
@@ -134,6 +147,7 @@ const updateTaskInProject = async (data,workspaceId,projectId,taskId) => {
   }
 
   const updates = {};
+
   if (data.title !== undefined) {
     updates.title = data.title;
   }
@@ -158,24 +172,25 @@ const updateTaskInProject = async (data,workspaceId,projectId,taskId) => {
     updates.assignee = data.assigneeId;
   }
 
+  
   if (data.status !== undefined) {
     updates.status = data.status;
 
-   if (data.status !== task.status) {
-        const lastTask = await Task.findOne({
+    if (data.status !== task.status) {
+      const lastTask = await Task.findOne({
         workspaceId,
         projectId,
         status: data.status,
         _id: { $ne: taskId },
-        })
+      })
         .sort({ position: -1 })
         .select("position");
 
-        updates.position = lastTask
+      updates.position = lastTask
         ? lastTask.position + 1
         : 0;
     }
-    }
+  }
 
   const updatedTask = await Task.findOneAndUpdate(
     {
@@ -204,6 +219,90 @@ const updateTaskInProject = async (data,workspaceId,projectId,taskId) => {
   if (!updatedTask) {
     return { status: "task_not_found" };
   }
+
+  const activityEvents = [];
+
+  const getReferenceId = (value) =>
+    value ? String(value._id || value) : null;
+
+  const normalize = (value) =>
+    value instanceof Date
+      ? value.getTime()
+      : JSON.stringify(value ?? null);
+
+  const readableValue = (value) =>
+    String(value ?? "none").replace(/_/g, " ");
+
+  if (task.status !== updatedTask.status) {
+    activityEvents.push({
+      action: "status_changed",
+      message: `changed status from ${readableValue(task.status)} to ${readableValue(updatedTask.status)}`,
+      metadata: {
+        from: task.status,
+        to: updatedTask.status,
+      },
+    });
+  }
+
+  if (task.priority !== updatedTask.priority) {
+    activityEvents.push({
+      action: "priority_changed",
+      message: `changed priority from ${task.priority} to ${updatedTask.priority}`,
+      metadata: {
+        from: task.priority,
+        to: updatedTask.priority,
+      },
+    });
+  }
+
+  const oldAssigneeId = getReferenceId(task.assignee);
+  const newAssigneeId = getReferenceId(updatedTask.assignee);
+
+  if (oldAssigneeId !== newAssigneeId) {
+    activityEvents.push({
+      action: "assignee_changed",
+      message: newAssigneeId
+        ? "changed the task assignee"
+        : "unassigned the task",
+      metadata: {
+        from: oldAssigneeId,
+        to: newAssigneeId,
+      },
+    });
+  }
+
+  const detailFields = [
+    "title",
+    "description",
+    "dueDate",
+    "labels",
+  ];
+
+  const changedFields = detailFields.filter(
+    (field) => normalize(task[field]) !== normalize(updatedTask[field])
+  );
+
+  if (changedFields.length > 0) {
+    activityEvents.push({
+      action: "task_updated",
+      message: "updated task details",
+      metadata: {
+        changedFields,
+      },
+    });
+  }
+
+  await Promise.all(
+    activityEvents.map((event) =>
+      recordTaskActivity({
+        workspaceId,
+        projectId,
+        taskId,
+        actorId,
+        ...event,
+      })
+    )
+  );
 
   return {
     status: "updated",
@@ -234,11 +333,19 @@ const deleteTaskFromProject = async (workspaceId,projectId,taskId) => {
   return { status: "deleted" };
 };
 
-
 const moveTaskInProject = async (
-  { status: newStatus, position: requestedPosition },workspaceId,projectId,taskId) => {
+  { status: newStatus, position: requestedPosition },
+  workspaceId,
+  projectId,
+  taskId,
+  actorId
+) => {
   const session = await mongoose.startSession();
+
   let outcome;
+  let previousStatus = null;
+  let previousPosition = null;
+
   try {
     await session.withTransaction(async () => {
       const project = await Project.findOne({
@@ -263,12 +370,14 @@ const moveTaskInProject = async (
         outcome = { status: "task_not_found" };
         return;
       }
-      const oldStatus = task.status;
+
+      previousStatus = task.status;
+      previousPosition = task.position;
 
       const sourceTasks = await Task.find({
         workspaceId,
         projectId,
-        status: oldStatus,
+        status: previousStatus,
       })
         .sort({ position: 1, createdAt: 1, _id: 1 })
         .session(session);
@@ -277,7 +386,8 @@ const moveTaskInProject = async (
         (item) => item._id.toString() !== taskId.toString()
       );
 
-      if (oldStatus === newStatus) {
+      if (previousStatus === newStatus) {
+        
         const orderedTasks = [...remainingSourceTasks];
 
         const insertAt = Math.min(
@@ -303,8 +413,11 @@ const moveTaskInProject = async (
           },
         }));
 
-        await Task.bulkWrite(operations, { session });
+        if (operations.length > 0) {
+          await Task.bulkWrite(operations, { session });
+        }
       } else {
+        
         const destinationTasks = await Task.find({
           workspaceId,
           projectId,
@@ -353,10 +466,14 @@ const moveTaskInProject = async (
           })
         );
 
-        await Task.bulkWrite(
-          [...sourceOperations, ...destinationOperations],
-          { session }
-        );
+        const operations = [
+          ...sourceOperations,
+          ...destinationOperations,
+        ];
+
+        if (operations.length > 0) {
+          await Task.bulkWrite(operations, { session });
+        }
       }
 
       outcome = { status: "moved" };
@@ -385,6 +502,34 @@ const moveTaskInProject = async (
       return { status: "task_not_found" };
     }
 
+    if (previousStatus !== movedTask.status) {
+      await recordTaskActivity({
+        workspaceId,
+        projectId,
+        taskId,
+        actorId,
+        action: "status_changed",
+        message: `moved task from ${previousStatus.replace(/_/g, " ")} to ${movedTask.status.replace(/_/g, " ")}`,
+        metadata: {
+          from: previousStatus,
+          to: movedTask.status,
+        },
+      });
+    } else if (previousPosition !== movedTask.position) {
+      await recordTaskActivity({
+        workspaceId,
+        projectId,
+        taskId,
+        actorId,
+        action: "task_reordered",
+        message: `reordered task in ${movedTask.status.replace(/_/g, " ")}`,
+        metadata: {
+          fromPosition: previousPosition,
+          toPosition: movedTask.position,
+        },
+      });
+    }
+
     return {
       status: "moved",
       task: movedTask,
@@ -393,6 +538,5 @@ const moveTaskInProject = async (
     await session.endSession();
   }
 };
-
 
 module.exports = {createTaskInProject,getTasksByProject,updateTaskInProject,deleteTaskFromProject,moveTaskInProject};

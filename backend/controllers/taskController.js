@@ -104,7 +104,8 @@ const updateTask = async (req, res) => {
       req.body,
       workspaceId,
       projectId,
-      taskId
+      taskId,
+      req.user._id
     );
 
     if (result.status === "project_not_found") {
@@ -210,7 +211,8 @@ const moveTask = async (req, res) => {
       req.body,
       workspaceId,
       projectId,
-      taskId
+      taskId,
+      req.user._id
     );
 
     if (result.status === "project_not_found") {

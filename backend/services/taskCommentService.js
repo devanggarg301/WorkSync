@@ -1,6 +1,7 @@
 const Project = require("../models/Project");
 const Task = require("../models/Task");
 const TaskComment = require("../models/TaskComment");
+const {recordTaskActivity} = require("./taskActivityService");
 
 const getTaskComments = async (workspaceId,projectId,taskId) => {
   const project = await Project.findOne({
@@ -71,6 +72,17 @@ const createTaskComment = async (body,workspaceId,projectId,taskId,userId) => {
     path: "authorId",
     select: "username avatarUrl",
   });
+  await recordTaskActivity({
+  workspaceId,
+  projectId,
+  taskId,
+  actorId: userId,
+  action: "comment_added",
+  message: "added a comment",
+  metadata: {
+    commentId: comment._id,
+  },
+});
 
   return {
     status: "created",
