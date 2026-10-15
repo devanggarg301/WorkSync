@@ -1,37 +1,54 @@
 
-import { useCallback, useEffect, useState } from "react";
+import {useCallback,useEffect,useMemo,useState,} from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, FolderPlus, Plus } from "lucide-react";
+import {ArrowLeft,FolderPlus,Plus,Search,X,Trash2,ShieldCheck,} from "lucide-react";
+import { createPortal } from "react-dom";
 
+import { useAuth } from "../context/AuthContext";
 import api from "../api/client";
 import ProjectCard from "../components/ProjectCard";
 import CreateProjectModal from "../components/CreateProjectModal";
 
+const MEMBERS_PER_PAGE = 20;
+
 function WorkspacePage() {
   const { workspaceId } = useParams();
+  const { user } = useAuth();
+  const currentUserId = user?._id;
 
   const [workspace, setWorkspace] = useState(null);
   const [projects, setProjects] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
   const [showCreateModal, setShowCreateModal] = useState(false);
 
-  // Workspace members
+  
   const [members, setMembers] = useState([]);
   const [membersLoading, setMembersLoading] = useState(true);
   const [membersError, setMembersError] = useState("");
 
-  // Add-member form
+  
   const [memberEmail, setMemberEmail] = useState("");
   const [addingMember, setAddingMember] = useState(false);
   const [memberSuccess, setMemberSuccess] = useState("");
 
-  // Active workspace tab
+  
   const [activeTab, setActiveTab] = useState("projects");
 
-  // Load workspace details and projects.
+  
+  const [memberSearch, setMemberSearch] = useState("");
+  const [memberRoleFilter, setMemberRoleFilter] = useState("all");
+  const [currentMemberPage, setCurrentMemberPage] = useState(1);
+
+  
+  const [updatingRoleUserId, setUpdatingRoleUserId] = useState(null);
+  const [memberToRemove, setMemberToRemove] = useState(null);
+  const [removingMemberId, setRemovingMemberId] = useState(null);
+  const [memberActionError, setMemberActionError] = useState("");
+  const [memberActionSuccess, setMemberActionSuccess] = useState("");
+
+  
   const loadWorkspaceData = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -55,7 +72,7 @@ function WorkspacePage() {
     }
   }, [workspaceId]);
 
-  // Load the workspace's members.
+  
   const loadMembers = useCallback(async () => {
     setMembersLoading(true);
     setMembersError("");
@@ -84,7 +101,7 @@ function WorkspacePage() {
     void loadMembers();
   }, [loadMembers]);
 
-  // Add an existing WorkSync user to this workspace.
+  
   const handleAddMember = async (event) => {
     event.preventDefault();
 
@@ -95,6 +112,8 @@ function WorkspacePage() {
     setAddingMember(true);
     setMembersError("");
     setMemberSuccess("");
+    setMemberActionError("");
+    setMemberActionSuccess("");
 
     try {
       const response = await api.post(
@@ -104,15 +123,19 @@ function WorkspacePage() {
 
       const newMember = response.data.member;
 
+      
       setMembers((currentMembers) => [
-        ...currentMembers,
         newMember,
+        ...currentMembers,
       ]);
 
       setMemberEmail("");
+      setMemberSearch("");
+      setMemberRoleFilter("all");
+      setCurrentMemberPage(1);
+
       setMemberSuccess(
-        response.data.message ||
-          "Member added successfully."
+        response.data.message || "Member added successfully."
       );
     } catch (err) {
       setMembersError(
@@ -122,6 +145,191 @@ function WorkspacePage() {
     } finally {
       setAddingMember(false);
     }
+  };
+
+  
+  const handleChangeMemberRole = async (userId, newRole) => {
+    if (updatingRoleUserId || removingMemberId) return;
+
+    const targetId = String(userId);
+
+    const previousRole = members.find(
+      (member) => String(member.userId) === targetId
+    )?.role;
+
+    if (!previousRole || previousRole === newRole) return;
+
+    setUpdatingRoleUserId(targetId);
+    setMemberActionError("");
+    setMemberActionSuccess("");
+    setMembersError("");
+    setMemberSuccess("");
+
+    
+    setMembers((currentMembers) =>
+      currentMembers.map((member) =>
+        String(member.userId) === targetId
+          ? { ...member, role: newRole }
+          : member
+      )
+    );
+
+    try {
+      const response = await api.patch(
+        `/workspaces/${workspaceId}/members/${userId}/role`,
+        { role: newRole }
+      );
+
+      const savedRole = response.data.membership.role;
+
+      
+      setMembers((currentMembers) =>
+        currentMembers.map((member) =>
+          String(member.userId) === targetId
+            ? { ...member, role: savedRole }
+            : member
+        )
+      );
+
+      setMemberActionSuccess(
+        `Updated ${newRole === "admin" ? "admin" : "member"} role successfully.`
+      );
+    } catch (err) {
+      
+      setMembers((currentMembers) =>
+        currentMembers.map((member) =>
+          String(member.userId) === targetId
+            ? { ...member, role: previousRole }
+            : member
+        )
+      );
+
+      setMemberActionError(
+        err.response?.data?.message ||
+          "Unable to update member role. Please try again."
+      );
+    } finally {
+      setUpdatingRoleUserId(null);
+    }
+  };
+
+  
+  const handleStartRemoveMember = (member) => {
+    setMemberActionError("");
+    setMemberActionSuccess("");
+    setMemberToRemove(member);
+  };
+
+  
+  const handleCancelRemoveMember = () => {
+    if (removingMemberId) return;
+
+    setMemberToRemove(null);
+    setMemberActionError("");
+  };
+
+  
+  const handleConfirmRemoveMember = async () => {
+    if (
+      !memberToRemove ||
+      removingMemberId ||
+      updatingRoleUserId
+    ) {
+      return;
+    }
+
+    const target = memberToRemove;
+    const targetId = String(target.userId);
+
+    setRemovingMemberId(targetId);
+    setMemberActionError("");
+    setMemberActionSuccess("");
+    setMembersError("");
+    setMemberSuccess("");
+
+    try {
+      await api.delete(
+        `/workspaces/${workspaceId}/members/${target.userId}`
+      );
+
+      setMembers((currentMembers) =>
+        currentMembers.filter(
+          (member) => String(member.userId) !== targetId
+        )
+      );
+
+      setMemberToRemove(null);
+
+      setMemberActionSuccess(
+        `${target.username || target.email || "Member"} was removed from the workspace.`
+      );
+    } catch (err) {
+      setMemberActionError(
+        err.response?.data?.message ||
+          "Unable to remove this member. Please try again."
+      );
+    } finally {
+      setRemovingMemberId(null);
+    }
+  };
+
+  
+  const filteredMembers = useMemo(() => {
+    const search = memberSearch.trim().toLowerCase();
+
+    return members.filter((member) => {
+      const username = (member.username || "").toLowerCase();
+      const email = (member.email || "").toLowerCase();
+
+      const matchesSearch =
+        !search ||
+        username.includes(search) ||
+        email.includes(search);
+
+      const matchesRole =
+        memberRoleFilter === "all" ||
+        member.role === memberRoleFilter;
+
+      return matchesSearch && matchesRole;
+    });
+  }, [members, memberSearch, memberRoleFilter]);
+
+  const totalMemberPages = Math.max(
+    1,
+    Math.ceil(filteredMembers.length / MEMBERS_PER_PAGE)
+  );
+
+  const visibleMembers = useMemo(() => {
+    const startIndex =
+      (currentMemberPage - 1) * MEMBERS_PER_PAGE;
+
+    return filteredMembers.slice(
+      startIndex,
+      startIndex + MEMBERS_PER_PAGE
+    );
+  }, [filteredMembers, currentMemberPage]);
+
+  
+  useEffect(() => {
+    setCurrentMemberPage((page) =>
+      Math.min(page, totalMemberPages)
+    );
+  }, [totalMemberPages]);
+
+  const handleSearchChange = (event) => {
+    setMemberSearch(event.target.value);
+    setCurrentMemberPage(1);
+  };
+
+  const handleRoleFilterChange = (event) => {
+    setMemberRoleFilter(event.target.value);
+    setCurrentMemberPage(1);
+  };
+
+  const clearMemberFilters = () => {
+    setMemberSearch("");
+    setMemberRoleFilter("all");
+    setCurrentMemberPage(1);
   };
 
   if (loading) {
@@ -166,9 +374,7 @@ function WorkspacePage() {
     workspace.role
   );
 
-  const canCreateProject = ["owner", "admin"].includes(
-    workspace.role
-  );
+  const canChangeMemberRoles = workspace.role === "owner";
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-10 md:py-12">
@@ -248,10 +454,7 @@ function WorkspacePage() {
 
       {/* Projects tab */}
       {activeTab === "projects" && (
-        <section
-          role="tabpanel"
-          className="mt-8"
-        >
+        <section role="tabpanel" className="mt-8">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-xl font-semibold text-slate-900">
@@ -269,7 +472,7 @@ function WorkspacePage() {
                 {projects.length === 1 ? "project" : "projects"}
               </span>
 
-              {canCreateProject && (
+              {canManageMembers && (
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(true)}
@@ -305,7 +508,7 @@ function WorkspacePage() {
                 and collaborating with your team.
               </p>
 
-              {canCreateProject && (
+              {canManageMembers && (
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(true)}
@@ -321,10 +524,7 @@ function WorkspacePage() {
 
       {/* Members tab */}
       {activeTab === "members" && (
-        <section
-          role="tabpanel"
-          className="mt-8"
-        >
+        <section role="tabpanel" className="mt-8">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-xl font-semibold text-slate-900">
@@ -332,7 +532,7 @@ function WorkspacePage() {
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
-                View people who have access to this workspace.
+                Search members, manage roles, and control access.
               </p>
             </div>
 
@@ -341,7 +541,7 @@ function WorkspacePage() {
             </span>
           </div>
 
-          {/* Add member form */}
+          {/* Add member */}
           {canManageMembers && (
             <form
               onSubmit={handleAddMember}
@@ -383,7 +583,7 @@ function WorkspacePage() {
             </form>
           )}
 
-          {/* Member feedback */}
+          {/* Add-member feedback */}
           {membersError && (
             <p
               role="alert"
@@ -401,6 +601,86 @@ function WorkspacePage() {
               {memberSuccess}
             </p>
           )}
+
+          {/* Role/removal feedback */}
+          {memberActionError && !memberToRemove && (
+            <p
+              role="alert"
+              className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700"
+            >
+              {memberActionError}
+            </p>
+          )}
+
+          {memberActionSuccess && (
+            <p
+              role="status"
+              className="mt-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700"
+            >
+              {memberActionSuccess}
+            </p>
+          )}
+
+          {/* Search and role filter */}
+          <div className="mt-6 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:grid-cols-[minmax(0,1fr)_200px_auto] sm:items-end">
+            <div>
+              <label
+                htmlFor="member-search"
+                className="mb-1.5 block text-sm font-medium text-slate-700"
+              >
+                Search members
+              </label>
+
+              <div className="relative">
+                <Search
+                  size={17}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+
+                <input
+                  id="member-search"
+                  type="search"
+                  value={memberSearch}
+                  onChange={handleSearchChange}
+                  placeholder="Search name or email..."
+                  className="w-full rounded-lg border border-slate-300 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="member-role-filter"
+                className="mb-1.5 block text-sm font-medium text-slate-700"
+              >
+                Filter by role
+              </label>
+
+              <select
+                id="member-role-filter"
+                value={memberRoleFilter}
+                onChange={handleRoleFilterChange}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+              >
+                <option value="all">All roles</option>
+                <option value="owner">Owner</option>
+                <option value="admin">Admin</option>
+                <option value="member">Member</option>
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={clearMemberFilters}
+              disabled={
+                !memberSearch && memberRoleFilter === "all"
+              }
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <X size={15} />
+              Clear
+            </button>
+          </div>
 
           {/* Member list */}
           <div className="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white">
@@ -422,52 +702,201 @@ function WorkspacePage() {
                   Retry
                 </button>
               </div>
-            ) : members.length === 0 ? (
-              <p className="p-5 text-sm text-slate-500">
-                No members found.
-              </p>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {members.map((member) => {
-                  const displayName =
-                    member.username || member.email || "Unknown member";
+            ) : filteredMembers.length === 0 ? (
+              <div className="p-8 text-center">
+                <Search
+                  size={24}
+                  className="mx-auto text-slate-400"
+                />
 
-                  return (
-                    <div
-                      key={member.userId}
-                      className="flex items-center justify-between gap-3 p-4"
-                    >
-                      <div className="flex min-w-0 items-center gap-3">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-indigo-100 text-sm font-semibold text-indigo-700">
-                          {member.avatarUrl ? (
-                            <img
-                              src={member.avatarUrl}
-                              alt=""
-                              className="h-full w-full object-cover"
-                            />
+                <p className="mt-2 text-sm font-semibold text-slate-700">
+                  No members found
+                </p>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Try another search term or role.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={clearMemberFilters}
+                  className="mt-3 text-sm font-semibold text-indigo-600 hover:text-indigo-700"
+                >
+                  Clear filters
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="divide-y divide-slate-100">
+                  {visibleMembers.map((member) => {
+                    const displayName =
+                      member.username ||
+                      member.email ||
+                      "Unknown member";
+
+                    const targetId = String(member.userId);
+                    const isSelf =
+                      Boolean(currentUserId) &&
+                      targetId === String(currentUserId);
+
+                    const isOwner = member.role === "owner";
+
+                    
+                    
+                    const canRemoveThisMember =
+                      canManageMembers &&
+                      !isSelf &&
+                      !isOwner &&
+                      (workspace.role === "owner" ||
+                        member.role === "member");
+
+                    const isChangingRole =
+                      updatingRoleUserId === targetId;
+
+                    return (
+                      <div
+                        key={member.userId}
+                        className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-indigo-100 text-sm font-semibold text-indigo-700">
+                            {member.avatarUrl ? (
+                              <img
+                                src={member.avatarUrl}
+                                alt=""
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              displayName.charAt(0).toUpperCase()
+                            )}
+                          </div>
+
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-slate-900">
+                              {member.username || "Unknown user"}
+                              {isSelf && (
+                                <span className="ml-2 font-normal text-slate-400">
+                                  (You)
+                                </span>
+                              )}
+                            </p>
+
+                            <p className="truncate text-sm text-slate-500">
+                              {member.email}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          {/* Only the owner can change roles. */}
+                          {canChangeMemberRoles && !isOwner ? (
+                            <label className="flex items-center gap-2">
+                              <span className="sr-only">
+                                Role for {displayName}
+                              </span>
+
+                              <select
+                                value={member.role}
+                                onChange={(event) => {
+                                  void handleChangeMemberRole(
+                                    member.userId,
+                                    event.target.value
+                                  );
+                                }}
+                                disabled={
+                                  Boolean(updatingRoleUserId) ||
+                                  Boolean(removingMemberId)
+                                }
+                                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm capitalize outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:opacity-50"
+                              >
+                                <option value="member">Member</option>
+                                <option value="admin">Admin</option>
+                              </select>
+
+                              {isChangingRole && (
+                                <span className="text-xs text-slate-500">
+                                  Saving...
+                                </span>
+                              )}
+                            </label>
                           ) : (
-                            displayName.charAt(0).toUpperCase()
+                            <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium capitalize text-slate-700">
+                              {member.role}
+                            </span>
+                          )}
+
+                          {canRemoveThisMember && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleStartRemoveMember(member)
+                              }
+                              disabled={
+                                Boolean(removingMemberId) ||
+                                Boolean(updatingRoleUserId)
+                              }
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Trash2 size={14} />
+                              Remove
+                            </button>
                           )}
                         </div>
-
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-slate-900">
-                            {member.username || "Unknown user"}
-                          </p>
-
-                          <p className="truncate text-sm text-slate-500">
-                            {member.email}
-                          </p>
-                        </div>
                       </div>
+                    );
+                  })}
+                </div>
 
-                      <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium capitalize text-slate-700">
-                        {member.role}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+                {/* Pagination */}
+                <div className="flex flex-col gap-3 border-t border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-slate-500">
+                    Showing{" "}
+                    {(currentMemberPage - 1) *
+                      MEMBERS_PER_PAGE +
+                      1}{" "}
+                    to{" "}
+                    {Math.min(
+                      currentMemberPage * MEMBERS_PER_PAGE,
+                      filteredMembers.length
+                    )}{" "}
+                    of {filteredMembers.length} members
+                  </p>
+
+                  <div className="flex items-center justify-between gap-3 sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCurrentMemberPage((page) =>
+                          Math.max(1, page - 1)
+                        )
+                      }
+                      disabled={currentMemberPage === 1}
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Previous
+                    </button>
+
+                    <span className="whitespace-nowrap text-sm text-slate-600">
+                      Page {currentMemberPage} of {totalMemberPages}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCurrentMemberPage((page) =>
+                          Math.min(totalMemberPages, page + 1)
+                        )
+                      }
+                      disabled={
+                        currentMemberPage >= totalMemberPages
+                      }
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         </section>
@@ -481,6 +910,86 @@ function WorkspacePage() {
           onCreated={loadWorkspaceData}
         />
       )}
+
+      {/* In-app removal confirmation */}
+      {memberToRemove &&
+        createPortal(
+          <div
+            className="fixed inset-0 flex items-center justify-center bg-slate-950/60 p-4"
+            style={{ zIndex: 9999 }}
+            onMouseDown={(event) => {
+              if (
+                event.target === event.currentTarget &&
+                !removingMemberId
+              ) {
+                handleCancelRemoveMember();
+              }
+            }}
+          >
+            <section
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="remove-member-title"
+              aria-describedby="remove-member-description"
+              className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+            >
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-600">
+                <Trash2 size={22} />
+              </div>
+
+              <h2
+                id="remove-member-title"
+                className="mt-4 text-lg font-bold text-slate-900"
+              >
+                Remove this member?
+              </h2>
+
+              <p
+                id="remove-member-description"
+                className="mt-2 text-sm leading-6 text-slate-600"
+              >
+                <span className="font-semibold text-slate-900">
+                  {memberToRemove.username ||
+                    memberToRemove.email ||
+                    "This member"}
+                </span>{" "}
+                will lose access to this workspace. This action
+                does not delete their WorkSync account.
+              </p>
+
+              {memberActionError && (
+                <p
+                  role="alert"
+                  className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700"
+                >
+                  {memberActionError}
+                </p>
+              )}
+
+              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={handleCancelRemoveMember}
+                  disabled={Boolean(removingMemberId)}
+                  className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:w-auto"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleConfirmRemoveMember}
+                  disabled={Boolean(removingMemberId)}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                >
+                  <Trash2 size={16} />
+                  {removingMemberId ? "Removing..." : "Remove member"}
+                </button>
+              </div>
+            </section>
+          </div>,
+          document.body
+        )}
     </main>
   );
 }
