@@ -35,6 +35,8 @@ const taskActivitySchema = new mongoose.Schema(
         "assignee_changed",
         "task_reordered",
         "comment_added",
+        "comment_edited",
+        "comment_deleted",
       ],
       required: true,
     },
