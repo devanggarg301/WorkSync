@@ -12,7 +12,7 @@ const {create,getMyWorkspaces,getWorkspace,updateWorkspaceDetails,updateWorkspac
 
 const {createWorkspaceSchema,updateWorkspaceSchema,updateWorkspaceMemberRoleSchema,addWorkspaceMemberSchema} = require("../utils/validationSchemas");
 
-const {createInvitation,listInvitations,revokeInvitation,acceptInvitation,} = require("../controllers/workspaceInvitationController");
+const {createInvitation,listInvitations,revokeInvitation,acceptInvitation,getInvitationDetails} = require("../controllers/workspaceInvitationController");
 
 router.post("/",ensureAuthenticated,validateRequest(createWorkspaceSchema),create);
 router.get("/",ensureAuthenticated,getMyWorkspaces );
@@ -27,5 +27,6 @@ router.post("/invitations/:token/accept",ensureAuthenticated,acceptInvitation);
 router.post("/:workspaceId/invitations",ensureAuthenticated,validateObjectIdParam("workspaceId"),validateRequest(addWorkspaceMemberSchema),authorizeWorkspace("owner", "admin"),createInvitation);
 router.get("/:workspaceId/invitations",ensureAuthenticated,validateObjectIdParam("workspaceId"),authorizeWorkspace("owner", "admin"),listInvitations);
 router.delete("/:workspaceId/invitations/:invitationId",ensureAuthenticated,validateObjectIdParam("workspaceId"),validateObjectIdParam("invitationId"),authorizeWorkspace("owner", "admin"),revokeInvitation);
+router.get("/invitations/:token",getInvitationDetails);
 
 module.exports = router;

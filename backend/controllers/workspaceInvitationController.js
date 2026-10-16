@@ -1,9 +1,5 @@
-const {
-  createWorkspaceInvitation,
-  acceptWorkspaceInvitation,
-  listWorkspaceInvitations,
-  revokeWorkspaceInvitation,
-} = require("../services/workspaceInvitationService");
+const {createWorkspaceInvitation,acceptWorkspaceInvitation,listWorkspaceInvitations,revokeWorkspaceInvitation,getWorkspaceInvitationDetails} = require("../services/workspaceInvitationService");
+const {sendWorkspaceInvitationEmail} = require("../services/emailService");
 
 const createInvitation = async (req, res) => {
   try {
@@ -41,12 +37,42 @@ const createInvitation = async (req, res) => {
         invitation: result.invitation || undefined,
       });
     }
+    try {
+    await sendWorkspaceInvitationEmail({
+        to: result.invitation.invitedEmail,
+        inviterName: req.user.username,
+        workspaceName: result.workspace.name,
+        token: result.token,
+        expiresAt: result.invitation.expiresAt,
+    });
+    } catch (emailError) {
+    console.error(
+        "Send workspace invitation email error:",
+        emailError.message
+    );
+    try {
+        await revokeWorkspaceInvitation(
+        req.params.workspaceId,
+        result.invitation._id
+        );
+    } catch (cleanupError) {
+        console.error(
+        "Failed to revoke undelivered invitation:",
+        cleanupError.message
+        );
+    }
+
+    return res.status(502).json({
+        success: false,
+        message:
+        "Unable to send the invitation email. Please try again later.",
+    });
+    }
 
     return res.status(201).json({
-      success: true,
-      message:
-        "Invitation record created. Email delivery will be connected next.",
-      invitation: result.invitation,
+    success: true,
+    message: "Invitation email sent successfully",
+    invitation: result.invitation,
     });
   } catch (error) {
     console.error("Create workspace invitation error:", error);
@@ -204,5 +230,60 @@ const acceptInvitation = async (req, res) => {
   }
 };
 
+const getInvitationDetails = async (req, res) => {
+  try {
+    const result = await getWorkspaceInvitationDetails(
+      req.params.token
+    );
 
-module.exports = {createInvitation,listInvitations,revokeInvitation,acceptInvitation,};
+    if (result.status === "invalid_token") {
+      return res.status(404).json({
+        success: false,
+        message: "Invitation link is invalid or unavailable",
+      });
+    }
+
+    if (result.status === "expired") {
+      return res.status(410).json({
+        success: false,
+        message: "This invitation has expired",
+      });
+    }
+
+    if (result.status === "revoked") {
+      return res.status(410).json({
+        success: false,
+        message: "This invitation has been revoked",
+      });
+    }
+
+    if (result.status === "already_used") {
+      return res.status(409).json({
+        success: false,
+        message: "This invitation has already been used",
+      });
+    }
+
+    if (result.status === "workspace_not_found") {
+      return res.status(404).json({
+        success: false,
+        message: "The invited workspace no longer exists",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      invitation: result.invitation,
+      workspace: result.workspace,
+    });
+  } catch (error) {
+    console.error("Get invitation details error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+module.exports = {createInvitation,listInvitations,revokeInvitation,acceptInvitation,getInvitationDetails};

@@ -6,5 +6,6 @@ joi
 brcyptjs
 jsonwebtoken
 cookie-parser
+nodemailer
 
 @dnd-kit/core @dnd-kit/sortable @dnd-kit/utilities

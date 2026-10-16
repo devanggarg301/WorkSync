@@ -8,6 +8,7 @@ import { useAuth } from "../context/AuthContext";
 import api from "../api/client";
 import ProjectCard from "../components/ProjectCard";
 import CreateProjectModal from "../components/CreateProjectModal";
+import WorkspaceInvitations from "../components/WorkspaceInvitations";
 
 const MEMBERS_PER_PAGE = 20;
 
@@ -620,7 +621,10 @@ function WorkspacePage() {
               {memberActionSuccess}
             </p>
           )}
-
+          <WorkspaceInvitations
+          workspaceId={workspaceId}
+          canManage={["owner", "admin"].includes(workspace.role)}
+          />
           {/* Search and role filter */}
           <div className="mt-6 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:grid-cols-[minmax(0,1fr)_200px_auto] sm:items-end">
             <div>

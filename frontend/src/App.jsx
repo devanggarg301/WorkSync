@@ -13,6 +13,7 @@ import AuthLayout from "./layouts/AuthLayout";
 import AppLayout from "./layouts/AppLayout";
 import WorkspacePage from "./pages/WorkspacePage";
 import ProjectPage from "./pages/ProjectPage";
+import InvitationPage from "./pages/InvitationPage";
 
 function App() {
   return (
@@ -33,7 +34,7 @@ function App() {
           <Route path="/workspaces/:workspaceId/projects/:projectId" element={<ProjectPage />} />
         </Route>
       </Route>
-
+      <Route path="/invitations/:token" element={<InvitationPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

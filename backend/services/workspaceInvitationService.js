@@ -310,4 +310,56 @@ const revokeWorkspaceInvitation = async (workspaceId,invitationId) => {
   };
 };
 
-module.exports = {createWorkspaceInvitation,acceptWorkspaceInvitation,listWorkspaceInvitations,revokeWorkspaceInvitation,};
+const getWorkspaceInvitationDetails = async (token) => {
+  if (typeof token !== "string" || !token.trim()) {
+    return { status: "invalid_token" };
+  }
+  const tokenHash = hashInvitationToken(token.trim());
+  const invitation = await WorkspaceInvitation.findOne({tokenHash});
+
+  if (!invitation) {
+    return { status: "invalid_token" };
+  }
+
+  if (invitation.status !== "pending") {
+    if (invitation.status === "expired") {
+      return { status: "expired" };
+    }
+
+    if (invitation.status === "revoked") {
+      return { status: "revoked" };
+    }
+
+    return { status: "already_used" };
+  }
+
+  if (invitation.expiresAt <= new Date()) {
+    invitation.status = "expired";
+    await invitation.save();
+
+    return { status: "expired" };
+  }
+
+  const workspace = await Workspace.findById(
+    invitation.workspaceId
+  ).select("_id name slug");
+
+  if (!workspace) {
+    return { status: "workspace_not_found" };
+  }
+
+  return {
+    status: "pending",
+    invitation: {
+      invitedEmail: invitation.invitedEmail,
+      expiresAt: invitation.expiresAt,
+    },
+    workspace: {
+      _id: workspace._id,
+      name: workspace.name,
+      slug: workspace.slug,
+    },
+  };
+};
+
+module.exports = {createWorkspaceInvitation,acceptWorkspaceInvitation,listWorkspaceInvitations,revokeWorkspaceInvitation,getWorkspaceInvitationDetails};
