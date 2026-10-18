@@ -48,6 +48,8 @@ function ProjectPage() {
   const [activeTaskId, setActiveTaskId] = useState(null);
   const [movingTaskId, setMovingTaskId] = useState(null);
   const [selectedTask, setSelectedTask] = useState(null);
+  const [workspaceRole, setWorkspaceRole] = useState(null);
+  const [workspaceRoleLoading, setWorkspaceRoleLoading] = useState(true);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -329,11 +331,46 @@ function ProjectPage() {
     );
   };
 
+  useEffect(() => {
+  const controller = new AbortController();
+
+  const fetchWorkspaceRole = async () => {
+    setWorkspaceRoleLoading(true);
+
+    try {
+      const response = await api.get(
+        `/workspaces/${workspaceId}`,
+        { signal: controller.signal }
+      );
+
+      if (!controller.signal.aborted) {
+        setWorkspaceRole(
+          response.data.workspace.role ?? null
+        );
+      }
+    } catch {
+      if (!controller.signal.aborted) {
+        setWorkspaceRole(null);
+      }
+    } finally {
+      if (!controller.signal.aborted) {
+        setWorkspaceRoleLoading(false);
+      }
+    }
+  };
+
+  void fetchWorkspaceRole();
+
+  return () => {
+    controller.abort();
+  };
+}, [workspaceId]);
+
   const activeTask = tasks.find(
     (task) => task._id === activeTaskId
   );
 
-  if (loading) {
+  if (loading || workspaceRoleLoading) {
     return (
       <main className="mx-auto max-w-7xl px-6 py-12">
         <div className="h-8 w-56 animate-pulse rounded bg-slate-200" />
@@ -545,6 +582,7 @@ function ProjectPage() {
           projectId={projectId}
           onClose={() => setSelectedTask(null)}
           onUpdated={refreshTasks}
+          workspaceRole={workspaceRole}
         />
       )}
     </main>

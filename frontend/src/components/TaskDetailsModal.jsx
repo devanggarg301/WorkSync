@@ -32,7 +32,7 @@ function getDateInputValue(date) {
   return parsedDate.toISOString().slice(0, 10);
 }
 
-function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
+function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,workspaceRole}) {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(
     task.description || ""
@@ -59,7 +59,9 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   
   const [activityRefreshToken, setActivityRefreshToken] = useState(0);
-
+const canDeleteTask = ["owner", "admin"].includes(
+  workspaceRole
+);
   useEffect(() => {
     let active = true;
 
@@ -390,16 +392,22 @@ function TaskDetailsModal({task,workspaceId,projectId,onClose,onUpdated,}) {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5">
-            <button
-              type="button"
-              onClick={() => setShowDeleteConfirmation(true)}
-              disabled={isBusy}
-              className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Trash2 size={16} />
-              {deleting ? "Deleting..." : "Delete task"}
-            </button>
+          <div
+  className={`flex flex-wrap items-center ${
+    canDeleteTask ? "justify-between" : "justify-end"
+  } gap-3 border-t border-slate-100 pt-5`}
+>
+  {canDeleteTask && (
+    <button
+      type="button"
+      onClick={() => setShowDeleteConfirmation(true)}
+      disabled={isBusy}
+      className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <Trash2 size={16} />
+      {deleting ? "Deleting..." : "Delete task"}
+    </button>
+  )}
 
             <div className="flex gap-3">
               <button

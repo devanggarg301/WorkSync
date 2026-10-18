@@ -115,7 +115,7 @@ function InvitationPage() {
           password,
         });
       }
-      await login({emailpassword});
+      await login({ email, password });
 
       const response = await api.post(
         `/workspaces/invitations/${encodeURIComponent(token)}/accept`
