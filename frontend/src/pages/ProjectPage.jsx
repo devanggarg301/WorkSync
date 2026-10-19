@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useMemo,useState,} from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Plus, RefreshCw,} from "lucide-react";
+import { ArrowLeft, Plus, RefreshCw, Search, X } from "lucide-react";
 
 import {DndContext,DragOverlay,KeyboardSensor,PointerSensor,closestCorners,pointerWithin,useSensor,useSensors,
 } from "@dnd-kit/core";
@@ -12,6 +12,23 @@ import KanbanColumn from "../components/KanbanColumn";
 import TaskCard from "../components/TaskCard";
 import CreateTaskModal from "../components/CreateTaskModal";
 import TaskDetailsModal from "../components/TaskDetailsModal";
+
+const priorities = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "urgent", label: "Urgent" },
+];
+
+const getAssigneeId = (assignee) => {
+  if (!assignee) return "";
+
+  if (typeof assignee === "string") {
+    return assignee;
+  }
+
+  return String(assignee._id || assignee.userId || "");
+};
 
 const columns = [
   { id: "backlog", title: "Backlog" },
@@ -50,6 +67,16 @@ function ProjectPage() {
   const [selectedTask, setSelectedTask] = useState(null);
   const [workspaceRole, setWorkspaceRole] = useState(null);
   const [workspaceRoleLoading, setWorkspaceRoleLoading] = useState(true);
+
+const [searchQuery, setSearchQuery] = useState("");
+const [statusFilter, setStatusFilter] = useState("");
+const [priorityFilter, setPriorityFilter] = useState("");
+const [assigneeFilter, setAssigneeFilter] = useState("");
+const [dueDateFilter, setDueDateFilter] = useState("");
+
+const [workspaceMembers, setWorkspaceMembers] = useState([]);
+const [workspaceMembersLoading, setWorkspaceMembersLoading] =useState(true);
+const [workspaceMembersError, setWorkspaceMembersError] =useState("");
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -124,23 +151,110 @@ function ProjectPage() {
     }
   }, [workspaceId, projectId]);
 
-  const tasksByStatus = useMemo(() => {
-    const grouped = Object.fromEntries(
-      columns.map((column) => [column.id, []])
-    );
+  const filteredTasks = useMemo(() => {
+  const query = searchQuery.trim().toLowerCase();
 
-    for (const task of tasks) {
-      if (grouped[task.status]) {
-        grouped[task.status].push(task);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const nextWeek = new Date(today);
+  nextWeek.setDate(nextWeek.getDate() + 7);
+
+  return tasks.filter((task) => {
+    
+    if (query) {
+      const searchableText =
+        `${task.title || ""} ${task.description || ""}`
+          .toLowerCase();
+
+      if (!searchableText.includes(query)) {
+        return false;
       }
     }
 
-    for (const columnTasks of Object.values(grouped)) {
-      columnTasks.sort(sortByPosition);
+    
+    if (statusFilter && task.status !== statusFilter) {
+      return false;
     }
 
-    return grouped;
-  }, [tasks]);
+    
+    if (priorityFilter && task.priority !== priorityFilter) {
+      return false;
+    }
+
+    
+    if (
+      assigneeFilter &&
+      getAssigneeId(task.assignee) !== assigneeFilter
+    ) {
+      return false;
+    }
+
+    
+    if (dueDateFilter === "no_date") {
+      if (task.dueDate) return false;
+    } else if (dueDateFilter) {
+      
+      if (!task.dueDate || task.status === "done") {
+        return false;
+      }
+
+      const dueDate = new Date(task.dueDate);
+
+      if (Number.isNaN(dueDate.getTime())) {
+        return false;
+      }
+
+      dueDate.setHours(0, 0, 0, 0);
+
+      if (dueDateFilter === "overdue" && dueDate >= today) {
+        return false;
+      }
+
+      if (
+        dueDateFilter === "next_7_days" &&
+        (dueDate < today || dueDate > nextWeek)
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}, [
+  tasks,
+  searchQuery,
+  statusFilter,
+  priorityFilter,
+  assigneeFilter,
+  dueDateFilter,
+]);
+
+const hasActiveFilters = Boolean(
+  searchQuery.trim() ||
+    statusFilter ||
+    priorityFilter ||
+    assigneeFilter ||
+    dueDateFilter
+);
+
+const tasksByStatus = useMemo(() => {
+  const grouped = Object.fromEntries(
+    columns.map((column) => [column.id, []])
+  );
+
+  for (const task of filteredTasks) {
+    if (grouped[task.status]) {
+      grouped[task.status].push(task);
+    }
+  }
+
+  for (const columnTasks of Object.values(grouped)) {
+    columnTasks.sort(sortByPosition);
+  }
+
+  return grouped;
+}, [filteredTasks]);
 
   const handleTaskMove = useCallback(
     async (taskId, newStatus, targetIndex) => {
@@ -366,6 +480,41 @@ function ProjectPage() {
   };
 }, [workspaceId]);
 
+useEffect(() => {
+  const controller = new AbortController();
+
+  const loadWorkspaceMembers = async () => {
+    setWorkspaceMembersLoading(true);
+    setWorkspaceMembersError("");
+
+    try {
+      const response = await api.get(
+        `/workspaces/${workspaceId}/members`,
+        { signal: controller.signal }
+      );
+
+      if (!controller.signal.aborted) {
+        setWorkspaceMembers(response.data.members || []);
+      }
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        setWorkspaceMembersError(
+          err.response?.data?.message ||
+            "Unable to load workspace members."
+        );
+      }
+    } finally {
+      if (!controller.signal.aborted) {
+        setWorkspaceMembersLoading(false);
+      }
+    }
+  };
+
+  void loadWorkspaceMembers();
+
+  return () => controller.abort();
+}, [workspaceId]);
+
   const activeTask = tasks.find(
     (task) => task._id === activeTaskId
   );
@@ -484,8 +633,9 @@ function ProjectPage() {
 
           <div className="flex items-center gap-3">
             <span className="text-sm text-slate-500">
-              {tasks.length}{" "}
-              {tasks.length === 1 ? "task" : "tasks"}
+              {hasActiveFilters
+              ? `${filteredTasks.length} of ${tasks.length} tasks`
+              : `${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`}
             </span>
 
             <button
@@ -498,6 +648,124 @@ function ProjectPage() {
             </button>
           </div>
         </div>
+
+<div className="mb-5 rounded-xl border border-slate-200 bg-white p-4">
+  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+    <label className="block text-xs font-semibold text-slate-600 sm:col-span-2 xl:col-span-1">
+      Search tasks
+      <div className="relative mt-1">
+        <Search
+          size={16}
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+        />
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Title or description..."
+          className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm font-normal text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+        />
+      </div>
+    </label>
+
+    <label className="block text-xs font-semibold text-slate-600">
+      Status
+      <select
+        value={statusFilter}
+        onChange={(event) => setStatusFilter(event.target.value)}
+        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+      >
+        <option value="">All statuses</option>
+
+        {columns.map((column) => (
+          <option key={column.id} value={column.id}>
+            {column.title}
+          </option>
+        ))}
+      </select>
+    </label>
+
+    <label className="block text-xs font-semibold text-slate-600">
+      Priority
+
+      <select
+        value={priorityFilter}
+        onChange={(event) => setPriorityFilter(event.target.value)}
+        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+      >
+        <option value="">All priorities</option>
+
+        {priorities.map((priority) => (
+          <option key={priority.value} value={priority.value}>
+            {priority.label}
+          </option>
+        ))}
+      </select>
+    </label>
+
+    <label className="block text-xs font-semibold text-slate-600">
+      Assignee
+
+      <select
+        value={assigneeFilter}
+        onChange={(event) => setAssigneeFilter(event.target.value)}
+        disabled={
+          workspaceMembersLoading || workspaceMembers.length === 0
+        }
+        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+      >
+        <option value="">All assignees</option>
+
+        {workspaceMembers.map((member) => (
+          <option
+            key={member.userId}
+            value={String(member.userId)}
+          >
+            {member.username || member.email}
+          </option>
+        ))}
+      </select>
+    </label>
+    <label className="block text-xs font-semibold text-slate-600">
+      Due date
+
+      <select
+        value={dueDateFilter}
+        onChange={(event) => setDueDateFilter(event.target.value)}
+        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+      >
+        <option value="">Any due date</option>
+        <option value="overdue">Overdue</option>
+        <option value="next_7_days">Due in next 7 days</option>
+        <option value="no_date">No due date</option>
+      </select>
+    </label>
+  </div>
+
+  <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
+    <p className="text-xs text-slate-500" role="status">
+      {workspaceMembersError ||
+        "Combine search and filters to narrow your tasks."}
+    </p>
+
+    {hasActiveFilters && (
+      <button
+        type="button"
+        onClick={() => {
+          setSearchQuery("");
+          setStatusFilter("");
+          setPriorityFilter("");
+          setAssigneeFilter("");
+          setDueDateFilter("");
+        }}
+        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-indigo-600 transition hover:bg-indigo-50"
+      >
+        <X size={15} />
+        Clear filters
+      </button>
+    )}
+  </div>
+</div>
 
         {boardError && (
           <div
@@ -534,7 +802,40 @@ function ProjectPage() {
             </button>
           </div>
         )}
+        {filteredTasks.length === 0 && (
+  <div
+    role="status"
+    className="mb-4 rounded-xl border border-slate-200 bg-white p-6 text-center"
+  >
+    <p className="font-semibold text-slate-800">
+      {tasks.length === 0
+        ? "No tasks in this project yet."
+        : "No tasks match your current search and filters."}
+    </p>
 
+    <p className="mt-1 text-sm text-slate-500">
+      {tasks.length === 0
+        ? "Create a task to get started."
+        : "Try changing your search or clearing the filters."}
+    </p>
+
+    {hasActiveFilters && (
+      <button
+        type="button"
+        onClick={() => {
+          setSearchQuery("");
+          setStatusFilter("");
+          setPriorityFilter("");
+          setAssigneeFilter("");
+          setDueDateFilter("");
+        }}
+        className="mt-3 text-sm font-semibold text-indigo-600 hover:text-indigo-700"
+      >
+        Clear all filters
+      </button>
+    )}
+  </div>
+)}
         <DndContext
           sensors={sensors}
           collisionDetection={kanbanCollisionDetection}
