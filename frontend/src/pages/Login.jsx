@@ -1,11 +1,13 @@
-
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
 import { CheckCheck } from "lucide-react";
+import {signInWithPopup,signOut,} from "firebase/auth";
+
+import { useAuth } from "../context/AuthContext";
+import { auth, googleProvider } from "../firebase";
 
 function Login() {
-  const { login } = useAuth();
+  const { login, loginWithFirebase } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -13,8 +15,10 @@ function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
 
   const successMessage = location.state?.message;
+  const busy = submitting || googleSubmitting;
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -31,10 +35,48 @@ function Login() {
     } catch (err) {
       setError(
         err.response?.data?.message ||
-        "Unable to log in. Check your connection and try again."
+          "Unable to log in. Check your connection and try again."
       );
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setError("");
+    setGoogleSubmitting(true);
+
+    let firebaseSignedIn = false;
+
+    try {
+      const credential = await signInWithPopup(auth,googleProvider);
+      firebaseSignedIn = true;
+
+      const idToken = await credential.user.getIdToken();
+      
+      await loginWithFirebase(idToken);
+      await signOut(auth).catch(() => {});
+
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      if (firebaseSignedIn) {
+        await signOut(auth).catch(() => {});
+      }
+
+      if (err.code === "auth/popup-closed-by-user") {
+        setError("Google sign-in was cancelled.");
+      } else if (err.code === "auth/unauthorized-domain") {
+        setError(
+          "This domain is not authorized in Firebase Authentication settings."
+        );
+      } else {
+        setError(
+          err.response?.data?.message ||
+            "Unable to sign in with Google. Please try again."
+        );
+      }
+    } finally {
+      setGoogleSubmitting(false);
     }
   };
 
@@ -80,7 +122,33 @@ function Login() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+        <button
+          type="button"
+          onClick={handleGoogleLogin}
+          disabled={busy}
+          className="mt-6 flex w-full items-center justify-center gap-3 rounded-lg border border-slate-300 bg-white py-3 font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <span
+            aria-hidden="true"
+            className="text-xl font-bold text-blue-600"
+          >
+            G
+          </span>
+
+          {googleSubmitting
+            ? "Connecting to Google..."
+            : "Continue with Google"}
+        </button>
+
+        <div className="my-5 flex items-center gap-3">
+          <div className="h-px flex-1 bg-slate-200" />
+          <span className="text-xs text-slate-400">
+            OR CONTINUE WITH EMAIL
+          </span>
+          <div className="h-px flex-1 bg-slate-200" />
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label
               htmlFor="email"
@@ -96,7 +164,8 @@ function Login() {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               required
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+              disabled={busy}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50"
               placeholder="you@example.com"
             />
           </div>
@@ -116,14 +185,15 @@ function Login() {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               required
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+              disabled={busy}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50"
               placeholder="Enter your password"
             />
           </div>
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={busy}
             className="w-full rounded-lg bg-indigo-600 py-3 font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {submitting ? "Logging in..." : "Log in"}

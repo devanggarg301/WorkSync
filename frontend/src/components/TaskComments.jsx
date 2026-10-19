@@ -18,6 +18,29 @@ function formatCommentDate(date) {
   });
 }
 
+function CommentAvatar({ username, avatarUrl }) {
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [avatarUrl]);
+
+  return (
+    <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-indigo-100 text-sm font-semibold text-indigo-700">
+      {avatarUrl && !imageFailed ? (
+        <img
+          src={avatarUrl}
+          alt=""
+          className="h-full w-full object-cover"
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        username.charAt(0).toUpperCase()
+      )}
+    </div>
+  );
+}
+
 function TaskComments({workspaceId,projectId,taskId,onCommentAdded,}) {
   const { user } = useAuth();
   const currentUserId = user?._id;
@@ -351,17 +374,10 @@ function TaskComments({workspaceId,projectId,taskId,onCommentAdded,}) {
                 className="flex items-start gap-3"
               >
                 {/* Author avatar */}
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-indigo-100 text-sm font-semibold text-indigo-700">
-                  {author?.avatarUrl ? (
-                    <img
-                      src={author.avatarUrl}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    username.charAt(0).toUpperCase()
-                  )}
-                </div>
+                <CommentAvatar
+                  username={username}
+                  avatarUrl={author?.avatarUrl}
+                />
 
                 <div className="min-w-0 flex-1">
                   {/* Author and comment date */}

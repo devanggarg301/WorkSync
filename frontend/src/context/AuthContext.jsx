@@ -1,6 +1,7 @@
-import {createContext,useContext,useEffect,useState} from "react";
-
+import {createContext,useContext,useEffect,useState,} from "react";
+import { signOut } from "firebase/auth";
 import api from "../api/client";
+import { auth } from "../firebase";
 
 const AuthContext = createContext(null);
 
@@ -28,10 +29,11 @@ export function AuthProvider({ children }) {
         }
       }
     };
-
     restoreSession();
 
-    return () => {active = false};
+    return () => {
+      active = false;
+    };
   }, []);
 
   const login = async (credentials) => {
@@ -39,6 +41,15 @@ export function AuthProvider({ children }) {
       "/auth/login",
       credentials
     );
+
+    setUser(response.data.user);
+    return response.data;
+  };
+
+  const loginWithFirebase = async (idToken) => {
+    const response = await api.post("/auth/firebase", {
+      idToken,
+    });
 
     setUser(response.data.user);
 
@@ -55,12 +66,15 @@ export function AuthProvider({ children }) {
   };
 
   const logout = async () => {
-  await api.post("/auth/logout");
-  setUser(null);
+    await api.post("/auth/logout");
+    await signOut(auth).catch(() => {});
+    setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{user,loading,login,register,logout}}>
+    <AuthContext.Provider
+      value={{user,loading,login,loginWithFirebase,register,logout}}
+    >
       {children}
     </AuthContext.Provider>
   );
@@ -74,6 +88,5 @@ export function useAuth() {
       "useAuth must be used inside AuthProvider"
     );
   }
-
   return context;
 }

@@ -7,5 +7,6 @@ brcyptjs
 jsonwebtoken
 cookie-parser
 nodemailer
-
+firebase
+firebase-admin
 @dnd-kit/core @dnd-kit/sortable @dnd-kit/utilities

@@ -1,6 +1,4 @@
-
 const mongoose = require("mongoose");
-
 const userSchema = new mongoose.Schema(
   {
     username: {
@@ -22,8 +20,17 @@ const userSchema = new mongoose.Schema(
 
     passwordHash: {
       type: String,
-      required: true,
+      required: function () {
+        return !this.firebaseUid;
+      },
       select: false,
+    },
+
+    firebaseUid: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
     },
 
     avatarUrl: {
@@ -36,7 +43,5 @@ const userSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
-
 const User = mongoose.model("User", userSchema);
-
 module.exports = User;
