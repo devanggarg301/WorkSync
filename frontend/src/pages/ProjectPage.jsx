@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useMemo,useState,} from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Plus, RefreshCw, Search, X } from "lucide-react";
+import { ArrowLeft, Plus, RefreshCw, Search, X, LayoutGrid, List } from "lucide-react";
 
 import {DndContext,DragOverlay,KeyboardSensor,PointerSensor,closestCorners,pointerWithin,useSensor,useSensors,
 } from "@dnd-kit/core";
@@ -40,6 +40,70 @@ const columns = [
 
 const sortByPosition = (a, b) => a.position - b.position;
 
+const statusStyles = {
+  backlog: "bg-slate-100 text-slate-700",
+  todo: "bg-blue-50 text-blue-700",
+  in_progress: "bg-amber-50 text-amber-700",
+  in_review: "bg-violet-50 text-violet-700",
+  done: "bg-emerald-50 text-emerald-700",
+};
+
+const priorityStyles = {
+  low: "bg-slate-100 text-slate-700",
+  medium: "bg-blue-50 text-blue-700",
+  high: "bg-orange-50 text-orange-700",
+  urgent: "bg-red-50 text-red-700",
+};
+
+// Parse date-only strings as local calendar dates so they do not shift
+// to the previous day in time zones west of UTC.
+const parseCalendarDate = (value) => {
+  if (!value) return null;
+
+  if (typeof value === "string") {
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+    if (match) {
+      const [, year, month, day] = match;
+      const date = new Date(Number(year), Number(month) - 1, Number(day));
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const formatDueDate = (value) => {
+  if (!value) return "No due date";
+
+  const date = parseCalendarDate(value);
+  if (!date) return "Invalid date";
+
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+const getAssigneeName = (assignee, workspaceMembers) => {
+  if (!assignee) return "Unassigned";
+
+  if (typeof assignee === "object") {
+    if (assignee.username || assignee.email) {
+      return assignee.username || assignee.email;
+    }
+  }
+
+  const assigneeId = getAssigneeId(assignee);
+  const member = workspaceMembers.find(
+    (workspaceMember) => String(workspaceMember.userId) === assigneeId
+  );
+
+  return member?.username || member?.email || "Assigned";
+};
+
 const kanbanCollisionDetection = (args) => {
   const pointerCollisions = pointerWithin(args);
 
@@ -67,6 +131,7 @@ function ProjectPage() {
   const [selectedTask, setSelectedTask] = useState(null);
   const [workspaceRole, setWorkspaceRole] = useState(null);
   const [workspaceRoleLoading, setWorkspaceRoleLoading] = useState(true);
+  const [viewMode, setViewMode] = useState("board");
 
 const [searchQuery, setSearchQuery] = useState("");
 const [statusFilter, setStatusFilter] = useState("");
@@ -256,6 +321,20 @@ const tasksByStatus = useMemo(() => {
   return grouped;
 }, [filteredTasks]);
 
+  // In List view, group by status and then preserve each column's position order.
+  const listTasks = useMemo(() => {
+    return [...filteredTasks].sort((a, b) => {
+      const statusOrderA = columns.findIndex((column) => column.id === a.status);
+      const statusOrderB = columns.findIndex((column) => column.id === b.status);
+
+      if (statusOrderA !== statusOrderB) {
+        return statusOrderA - statusOrderB;
+      }
+
+      return sortByPosition(a, b);
+    });
+  }, [filteredTasks]);
+
   const handleTaskMove = useCallback(
     async (taskId, newStatus, targetIndex) => {
       if (movingTaskId) return;
@@ -378,7 +457,8 @@ const tasksByStatus = useMemo(() => {
 
   const handleDragEnd = ({active,over,activatorEvent,delta,}) => {
     setActiveTaskId(null);
-    if (!over || movingTaskId) return;
+    // Positions are calculated from the full task list, so do not reorder while filtering.
+    if (hasActiveFilters || !over || movingTaskId) return;
     const taskId = String(active.id);
     const draggedTask = tasks.find(
       (task) => task._id === taskId
@@ -618,25 +698,63 @@ useEffect(() => {
         </div>
       </section>
 
-      {/* Kanban board */}
+      {/* Task views */}
       <section className="mt-8">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">
-              Board
+              {viewMode === "board" ? "Board view" : "List view"}
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              Drag tasks between columns or reorder them.
+              {viewMode === "board"
+                ? hasActiveFilters
+                  ? "Clear filters to safely drag and reorder tasks."
+                  : "Drag tasks between columns or reorder them."
+                : "Review task details in a compact, sortable-by-status list."}
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm text-slate-500">
               {hasActiveFilters
-              ? `${filteredTasks.length} of ${tasks.length} tasks`
-              : `${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`}
+                ? `${filteredTasks.length} of ${tasks.length} tasks`
+                : `${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`}
             </span>
+
+            <div
+              className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1"
+              role="group"
+              aria-label="Task view"
+            >
+              <button
+                type="button"
+                aria-pressed={viewMode === "board"}
+                onClick={() => setViewMode("board")}
+                className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition ${
+                  viewMode === "board"
+                    ? "bg-white text-indigo-700 shadow-sm"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <LayoutGrid size={16} />
+                Board
+              </button>
+
+              <button
+                type="button"
+                aria-pressed={viewMode === "list"}
+                onClick={() => setViewMode("list")}
+                className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition ${
+                  viewMode === "list"
+                    ? "bg-white text-indigo-700 shadow-sm"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <List size={16} />
+                List
+              </button>
+            </div>
 
             <button
               type="button"
@@ -649,123 +767,114 @@ useEffect(() => {
           </div>
         </div>
 
-<div className="mb-5 rounded-xl border border-slate-200 bg-white p-4">
-  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-    <label className="block text-xs font-semibold text-slate-600 sm:col-span-2 xl:col-span-1">
-      Search tasks
-      <div className="relative mt-1">
-        <Search
-          size={16}
-          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-        />
-        <input
-          type="search"
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder="Title or description..."
-          className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm font-normal text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-        />
-      </div>
-    </label>
+        {/* Search and filters are shared by Board and List views. */}
+        <div className="mb-5 rounded-xl border border-slate-200 bg-white p-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <label className="block text-xs font-semibold text-slate-600 sm:col-span-2 xl:col-span-1">
+              Search tasks
+              <div className="relative mt-1">
+                <Search
+                  size={16}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Title or description..."
+                  className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm font-normal text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                />
+              </div>
+            </label>
 
-    <label className="block text-xs font-semibold text-slate-600">
-      Status
-      <select
-        value={statusFilter}
-        onChange={(event) => setStatusFilter(event.target.value)}
-        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-      >
-        <option value="">All statuses</option>
+            <label className="block text-xs font-semibold text-slate-600">
+              Status
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+              >
+                <option value="">All statuses</option>
+                {columns.map((column) => (
+                  <option key={column.id} value={column.id}>
+                    {column.title}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-        {columns.map((column) => (
-          <option key={column.id} value={column.id}>
-            {column.title}
-          </option>
-        ))}
-      </select>
-    </label>
+            <label className="block text-xs font-semibold text-slate-600">
+              Priority
+              <select
+                value={priorityFilter}
+                onChange={(event) => setPriorityFilter(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+              >
+                <option value="">All priorities</option>
+                {priorities.map((priority) => (
+                  <option key={priority.value} value={priority.value}>
+                    {priority.label}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-    <label className="block text-xs font-semibold text-slate-600">
-      Priority
+            <label className="block text-xs font-semibold text-slate-600">
+              Assignee
+              <select
+                value={assigneeFilter}
+                onChange={(event) => setAssigneeFilter(event.target.value)}
+                disabled={workspaceMembersLoading || workspaceMembers.length === 0}
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+              >
+                <option value="">All assignees</option>
+                {workspaceMembers.map((member) => (
+                  <option key={member.userId} value={String(member.userId)}>
+                    {member.username || member.email}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-      <select
-        value={priorityFilter}
-        onChange={(event) => setPriorityFilter(event.target.value)}
-        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-      >
-        <option value="">All priorities</option>
+            <label className="block text-xs font-semibold text-slate-600">
+              Due date
+              <select
+                value={dueDateFilter}
+                onChange={(event) => setDueDateFilter(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+              >
+                <option value="">Any due date</option>
+                <option value="overdue">Overdue</option>
+                <option value="next_7_days">Due in next 7 days</option>
+                <option value="no_date">No due date</option>
+              </select>
+            </label>
+          </div>
 
-        {priorities.map((priority) => (
-          <option key={priority.value} value={priority.value}>
-            {priority.label}
-          </option>
-        ))}
-      </select>
-    </label>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
+            <p className="text-xs text-slate-500" role="status">
+              {workspaceMembersError ||
+                "Combine search and filters to narrow your tasks."}
+            </p>
 
-    <label className="block text-xs font-semibold text-slate-600">
-      Assignee
-
-      <select
-        value={assigneeFilter}
-        onChange={(event) => setAssigneeFilter(event.target.value)}
-        disabled={
-          workspaceMembersLoading || workspaceMembers.length === 0
-        }
-        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-50"
-      >
-        <option value="">All assignees</option>
-
-        {workspaceMembers.map((member) => (
-          <option
-            key={member.userId}
-            value={String(member.userId)}
-          >
-            {member.username || member.email}
-          </option>
-        ))}
-      </select>
-    </label>
-    <label className="block text-xs font-semibold text-slate-600">
-      Due date
-
-      <select
-        value={dueDateFilter}
-        onChange={(event) => setDueDateFilter(event.target.value)}
-        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-      >
-        <option value="">Any due date</option>
-        <option value="overdue">Overdue</option>
-        <option value="next_7_days">Due in next 7 days</option>
-        <option value="no_date">No due date</option>
-      </select>
-    </label>
-  </div>
-
-  <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
-    <p className="text-xs text-slate-500" role="status">
-      {workspaceMembersError ||
-        "Combine search and filters to narrow your tasks."}
-    </p>
-
-    {hasActiveFilters && (
-      <button
-        type="button"
-        onClick={() => {
-          setSearchQuery("");
-          setStatusFilter("");
-          setPriorityFilter("");
-          setAssigneeFilter("");
-          setDueDateFilter("");
-        }}
-        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-indigo-600 transition hover:bg-indigo-50"
-      >
-        <X size={15} />
-        Clear filters
-      </button>
-    )}
-  </div>
-</div>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery("");
+                  setStatusFilter("");
+                  setPriorityFilter("");
+                  setAssigneeFilter("");
+                  setDueDateFilter("");
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-indigo-600 transition hover:bg-indigo-50"
+              >
+                <X size={15} />
+                Clear filters
+              </button>
+            )}
+          </div>
+        </div>
 
         {boardError && (
           <div
@@ -773,7 +882,6 @@ useEffect(() => {
             className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3"
           >
             <p className="text-sm text-red-700">{boardError}</p>
-
             <button
               type="button"
               onClick={() => loadProjectData()}
@@ -789,10 +897,7 @@ useEffect(() => {
             role="alert"
             className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3"
           >
-            <p className="text-sm text-amber-800">
-              {refreshError}
-            </p>
-
+            <p className="text-sm text-amber-800">{refreshError}</p>
             <button
               type="button"
               onClick={refreshTasks}
@@ -802,69 +907,174 @@ useEffect(() => {
             </button>
           </div>
         )}
-        {filteredTasks.length === 0 && (
-  <div
-    role="status"
-    className="mb-4 rounded-xl border border-slate-200 bg-white p-6 text-center"
-  >
-    <p className="font-semibold text-slate-800">
-      {tasks.length === 0
-        ? "No tasks in this project yet."
-        : "No tasks match your current search and filters."}
-    </p>
 
-    <p className="mt-1 text-sm text-slate-500">
-      {tasks.length === 0
-        ? "Create a task to get started."
-        : "Try changing your search or clearing the filters."}
-    </p>
-
-    {hasActiveFilters && (
-      <button
-        type="button"
-        onClick={() => {
-          setSearchQuery("");
-          setStatusFilter("");
-          setPriorityFilter("");
-          setAssigneeFilter("");
-          setDueDateFilter("");
-        }}
-        className="mt-3 text-sm font-semibold text-indigo-600 hover:text-indigo-700"
-      >
-        Clear all filters
-      </button>
-    )}
-  </div>
-)}
-        <DndContext
-          sensors={sensors}
-          collisionDetection={kanbanCollisionDetection}
-          onDragStart={({ active }) => {
-            setActiveTaskId(String(active.id));
-          }}
-          onDragEnd={handleDragEnd}
-          onDragCancel={() => setActiveTaskId(null)}
-        >
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-            {columns.map((column) => (
-              <KanbanColumn
-              key={column.id}
-              column={column}
-              movingTaskId={movingTaskId}
-              tasks={tasksByStatus[column.id]}
-              onOpenTask={setSelectedTask}
-            />
-            ))}
+        {filteredTasks.length === 0 ? (
+          <div
+            role="status"
+            className="rounded-xl border border-slate-200 bg-white p-8 text-center"
+          >
+            <p className="font-semibold text-slate-800">
+              {tasks.length === 0
+                ? "No tasks in this project yet."
+                : "No tasks match your current search and filters."}
+            </p>
+            <p className="mt-1 text-sm text-slate-500">
+              {tasks.length === 0
+                ? "Create a task to get started."
+                : "Try changing your search or clearing the filters."}
+            </p>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery("");
+                  setStatusFilter("");
+                  setPriorityFilter("");
+                  setAssigneeFilter("");
+                  setDueDateFilter("");
+                }}
+                className="mt-3 text-sm font-semibold text-indigo-600 hover:text-indigo-700"
+              >
+                Clear all filters
+              </button>
+            )}
           </div>
+        ) : viewMode === "board" ? (
+          <DndContext
+            sensors={hasActiveFilters ? [] : sensors}
+            collisionDetection={kanbanCollisionDetection}
+            onDragStart={({ active }) => {
+              // Reordering while filtered would use incorrect visible positions.
+              if (!hasActiveFilters) {
+                setActiveTaskId(String(active.id));
+              }
+            }}
+            onDragEnd={handleDragEnd}
+            onDragCancel={() => setActiveTaskId(null)}
+          >
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+              {columns.map((column) => (
+                <KanbanColumn
+                  key={column.id}
+                  column={column}
+                  movingTaskId={movingTaskId}
+                  tasks={tasksByStatus[column.id]}
+                  onOpenTask={setSelectedTask}
+                />
+              ))}
+            </div>
 
-          <DragOverlay>
-            {activeTask ? (
-              <div className="w-72 rotate-1 rounded-lg shadow-xl">
-                <TaskCard task={activeTask} />
-              </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
+            <DragOverlay>
+              {activeTask ? (
+                <div className="w-72 rotate-1 rounded-lg shadow-xl">
+                  <TaskCard task={activeTask} />
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] border-collapse text-left">
+                <thead className="border-b border-slate-200 bg-slate-50">
+                  <tr>
+                    <th scope="col" className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Task
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Status
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Priority
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Assignee
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Due date
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {listTasks.map((task) => {
+                    const statusColumn = columns.find(
+                      (column) => column.id === task.status
+                    );
+                    const priority = priorities.find(
+                      (item) => item.value === task.priority
+                    );
+                    const dueDate = parseCalendarDate(task.dueDate);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    dueDate?.setHours(0, 0, 0, 0);
+                    const isOverdue = Boolean(
+                      dueDate && dueDate < today && task.status !== "done"
+                    );
+
+                    return (
+                      <tr
+                        key={task._id}
+                        className="cursor-pointer transition hover:bg-indigo-50/50 focus-within:bg-indigo-50/50"
+                        onClick={() => setSelectedTask(task)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setSelectedTask(task);
+                          }
+                        }}
+                        tabIndex={0}
+                        aria-label={`Open task ${task.title}`}
+                      >
+                        <td className="px-5 py-4">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-900">
+                              {task.title}
+                            </p>
+                            {task.description && (
+                              <p className="mt-1 max-w-md truncate text-sm text-slate-500">
+                                {task.description}
+                              </p>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-4">
+                          <span
+                            className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${
+                              statusStyles[task.status] || "bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {statusColumn?.title || task.status || "Unknown"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4">
+                          <span
+                            className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${
+                              priorityStyles[task.priority] || "bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {priority?.label || task.priority || "Not set"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4 text-sm text-slate-700">
+                          {getAssigneeName(task.assignee, workspaceMembers)}
+                        </td>
+                        <td className={`whitespace-nowrap px-4 py-4 text-sm ${isOverdue ? "font-semibold text-red-600" : "text-slate-600"}`}>
+                          {formatDueDate(task.dueDate)}
+                          {isOverdue && (
+                            <span className="ml-2 text-xs">Overdue</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
+              Select a task row to open its details and discussion.
+            </div>
+          </div>
+        )}
       </section>
 
       {showCreateTaskModal && (
