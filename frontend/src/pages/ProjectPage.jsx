@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useMemo,useState,} from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Plus, RefreshCw, Search, X, LayoutGrid, List } from "lucide-react";
+import {ArrowLeft,Plus,RefreshCw,Search,X,LayoutGrid,List,CalendarDays,ChevronLeft,ChevronRight,} from "lucide-react";
 
 import {DndContext,DragOverlay,KeyboardSensor,PointerSensor,closestCorners,pointerWithin,useSensor,useSensors,
 } from "@dnd-kit/core";
@@ -64,14 +64,38 @@ const parseCalendarDate = (value) => {
     const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
 
     if (match) {
-      const [, year, month, day] = match;
-      const date = new Date(Number(year), Number(month) - 1, Number(day));
-      return Number.isNaN(date.getTime()) ? null : date;
+      const [, yearText, monthText, dayText] = match;
+      const year = Number(yearText);
+      const month = Number(monthText);
+      const day = Number(dayText);
+      const date = new Date(year, month - 1, day);
+
+      // JavaScript normalizes impossible dates (for example, February 31).
+      // Reject those values instead of silently moving them into another month.
+      if (
+        Number.isNaN(date.getTime()) ||
+        date.getFullYear() !== year ||
+        date.getMonth() !== month - 1 ||
+        date.getDate() !== day
+      ) {
+        return null;
+      }
+
+      return date;
     }
   }
 
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
+};
+
+// Build a local YYYY-MM-DD key without converting the date to UTC. This keeps
+// calendar tasks on the date users selected in the task form.
+const getCalendarDateKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 };
 
 const formatDueDate = (value) => {
@@ -132,6 +156,11 @@ function ProjectPage() {
   const [workspaceRole, setWorkspaceRole] = useState(null);
   const [workspaceRoleLoading, setWorkspaceRoleLoading] = useState(true);
   const [viewMode, setViewMode] = useState("board");
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  });
+  const [expandedCalendarDate, setExpandedCalendarDate] = useState(null);
 
 const [searchQuery, setSearchQuery] = useState("");
 const [statusFilter, setStatusFilter] = useState("");
@@ -264,9 +293,9 @@ const [workspaceMembersError, setWorkspaceMembersError] =useState("");
         return false;
       }
 
-      const dueDate = new Date(task.dueDate);
+      const dueDate = parseCalendarDate(task.dueDate);
 
-      if (Number.isNaN(dueDate.getTime())) {
+      if (!dueDate) {
         return false;
       }
 
@@ -334,6 +363,51 @@ const tasksByStatus = useMemo(() => {
       return sortByPosition(a, b);
     });
   }, [filteredTasks]);
+
+  // Generate a Monday-first calendar grid for the currently displayed month.
+  // Empty cells before/after the month keep every date aligned under its weekday.
+  const calendarCells = useMemo(() => {
+    const year = calendarMonth.getFullYear();
+    const month = calendarMonth.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const leadingEmptyCells = (firstDay.getDay() + 6) % 7;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const cells = Array(leadingEmptyCells).fill(null);
+
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      cells.push(new Date(year, month, day));
+    }
+
+    while (cells.length % 7 !== 0) {
+      cells.push(null);
+    }
+
+    return cells;
+  }, [calendarMonth]);
+
+  // Group the already-filtered tasks by due date. Board, List, and Calendar
+  // all work from the same task data and therefore share the same filters.
+  const calendarTasksByDate = useMemo(() => {
+    const grouped = {};
+
+    for (const task of filteredTasks) {
+      const dueDate = parseCalendarDate(task.dueDate);
+      if (!dueDate) continue;
+
+      const dateKey = getCalendarDateKey(dueDate);
+      if (!grouped[dateKey]) grouped[dateKey] = [];
+      grouped[dateKey].push(task);
+    }
+
+    return grouped;
+  }, [filteredTasks]);
+
+  // Tasks without a valid due date cannot appear in a date cell, so list them
+  // separately rather than hiding them from the Calendar view.
+  const unscheduledTasks = useMemo(
+    () => filteredTasks.filter((task) => !parseCalendarDate(task.dueDate)),
+    [filteredTasks]
+  );
 
   const handleTaskMove = useCallback(
     async (taskId, newStatus, targetIndex) => {
@@ -703,7 +777,11 @@ useEffect(() => {
         <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">
-              {viewMode === "board" ? "Board view" : "List view"}
+              {viewMode === "board"
+                ? "Board view"
+                : viewMode === "list"
+                  ? "List view"
+                  : "Calendar view"}
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
@@ -711,7 +789,9 @@ useEffect(() => {
                 ? hasActiveFilters
                   ? "Clear filters to safely drag and reorder tasks."
                   : "Drag tasks between columns or reorder them."
-                : "Review task details in a compact, sortable-by-status list."}
+                : viewMode === "list"
+                  ? "Review task details in a compact list grouped by status."
+                  : "See tasks on their due dates and open any task for details."}
             </p>
           </div>
 
@@ -754,6 +834,20 @@ useEffect(() => {
                 <List size={16} />
                 List
               </button>
+
+              <button
+                type="button"
+                aria-pressed={viewMode === "calendar"}
+                onClick={() => setViewMode("calendar")}
+                className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition ${
+                  viewMode === "calendar"
+                    ? "bg-white text-indigo-700 shadow-sm"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <CalendarDays size={16} />
+                Calendar
+              </button>
             </div>
 
             <button
@@ -767,7 +861,7 @@ useEffect(() => {
           </div>
         </div>
 
-        {/* Search and filters are shared by Board and List views. */}
+        {/* Search and filters are shared by Board, List, and Calendar views. */}
         <div className="mb-5 rounded-xl border border-slate-200 bg-white p-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <label className="block text-xs font-semibold text-slate-600 sm:col-span-2 xl:col-span-1">
@@ -972,7 +1066,7 @@ useEffect(() => {
               ) : null}
             </DragOverlay>
           </DndContext>
-        ) : (
+        ) : viewMode === "list" ? (
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[760px] border-collapse text-left">
@@ -1073,6 +1167,233 @@ useEffect(() => {
             <div className="border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
               Select a task row to open its details and discussion.
             </div>
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <div className="flex flex-col gap-4 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">
+                  {calendarMonth.toLocaleDateString(undefined, {
+                    month: "long",
+                    year: "numeric",
+                  })}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Tasks with due dates appear on their scheduled day. Select a task to open it.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCalendarMonth(
+                      (current) =>
+                        new Date(current.getFullYear(), current.getMonth() - 1, 1)
+                    )
+                  }
+                  aria-label="Previous month"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const today = new Date();
+                    setCalendarMonth(
+                      new Date(today.getFullYear(), today.getMonth(), 1)
+                    );
+                  }}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCalendarMonth(
+                      (current) =>
+                        new Date(current.getFullYear(), current.getMonth() + 1, 1)
+                    )
+                  }
+                  aria-label="Next month"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <div className="min-w-[840px]">
+                <div className="grid grid-cols-7 border-l border-t border-slate-200">
+                  {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(
+                    (weekday) => (
+                      <div
+                        key={weekday}
+                        className="border-b border-r border-slate-200 bg-slate-50 px-3 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500"
+                      >
+                        {weekday}
+                      </div>
+                    )
+                  )}
+
+                  {calendarCells.map((date, index) => {
+                    if (!date) {
+                      return (
+                        <div
+                          key={`empty-${index}`}
+                          aria-hidden="true"
+                          className="min-h-[135px] border-b border-r border-slate-200 bg-slate-50/60"
+                        />
+                      );
+                    }
+
+                    const dateKey = getCalendarDateKey(date);
+                    const dayTasks = calendarTasksByDate[dateKey] || [];
+                    const today = getCalendarDateKey(new Date()) === dateKey;
+
+                    return (
+                      <div
+                        key={dateKey}
+                        className="min-h-[135px] border-b border-r border-slate-200 bg-white p-2"
+                      >
+                        <div className="mb-2 flex items-center justify-between gap-1">
+                          <span
+                            className={`flex h-7 w-7 items-center justify-center rounded-full text-sm ${
+                              today
+                                ? "bg-indigo-600 font-bold text-white"
+                                : "font-medium text-slate-700"
+                            }`}
+                          >
+                            {date.getDate()}
+                          </span>
+                          {dayTasks.length > 0 && (
+                            <span className="text-[11px] text-slate-400">
+                              {dayTasks.length} {dayTasks.length === 1 ? "task" : "tasks"}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="space-y-1">
+                          {dayTasks
+                            .slice(
+                              0,
+                              expandedCalendarDate === dateKey ? dayTasks.length : 3
+                            )
+                            .map((task) => (
+                            <button
+                              key={task._id}
+                              type="button"
+                              onClick={() => setSelectedTask(task)}
+                              title={`${task.title} — ${formatDueDate(task.dueDate)}`}
+                              className={`block w-full truncate rounded-md px-2 py-1 text-left text-xs font-medium transition hover:ring-1 hover:ring-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                                statusStyles[task.status] || "bg-slate-100 text-slate-700"
+                              }`}
+                            >
+                              {task.title}
+                            </button>
+                          ))}
+
+                          {dayTasks.length > 3 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedCalendarDate((current) =>
+                                  current === dateKey ? null : dateKey
+                                )
+                              }
+                              aria-label={
+                                expandedCalendarDate === dateKey
+                                  ? `Show fewer tasks for ${formatDueDate(date)}`
+                                  : `Show all ${dayTasks.length} tasks for ${formatDueDate(date)}`
+                              }
+                              className="px-1 text-left text-xs font-semibold text-indigo-600 hover:text-indigo-700 focus:outline-none focus:underline"
+                            >
+                              {expandedCalendarDate === dateKey
+                                ? "Show less"
+                                : `+${dayTasks.length - 3} more`}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <section className="border-t border-slate-200 bg-slate-50/60 p-4 sm:p-5">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <h4 className="font-semibold text-slate-900">Unscheduled tasks</h4>
+                  <p className="mt-1 text-sm text-slate-500">
+                    These tasks have no valid due date, so they cannot be placed on a calendar day.
+                  </p>
+                </div>
+                <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
+                  {unscheduledTasks.length}
+                </span>
+              </div>
+
+              {unscheduledTasks.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-5 text-sm text-slate-500">
+                  No unscheduled tasks match your current search and filters.
+                </p>
+              ) : (
+                <div className="divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                  {unscheduledTasks.map((task) => {
+                    const statusColumn = columns.find(
+                      (column) => column.id === task.status
+                    );
+                    const priority = priorities.find(
+                      (item) => item.value === task.priority
+                    );
+
+                    return (
+                      <button
+                        key={task._id}
+                        type="button"
+                        onClick={() => setSelectedTask(task)}
+                        className="flex w-full flex-col gap-3 px-4 py-3 text-left transition hover:bg-indigo-50/50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold text-slate-900">
+                            {task.title}
+                          </span>
+                          {task.description && (
+                            <span className="mt-1 block truncate text-sm text-slate-500">
+                              {task.description}
+                            </span>
+                          )}
+                        </span>
+
+                        <span className="flex shrink-0 flex-wrap items-center gap-2">
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                              statusStyles[task.status] || "bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {statusColumn?.title || task.status || "Unknown"}
+                          </span>
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                              priorityStyles[task.priority] || "bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {priority?.label || task.priority || "Not set"}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            {getAssigneeName(task.assignee, workspaceMembers)}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
           </div>
         )}
       </section>
