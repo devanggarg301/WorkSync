@@ -8,6 +8,7 @@ const projectRoutes = require("./routes/projectRoutes");
 const taskRoutes = require("./routes/taskRoutes");
 const taskCommentRoutes = require("./routes/taskCommentRoutes");
 const taskActivityRoutes = require("./routes/taskActivityRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 
 const app = express();
 
@@ -34,5 +35,6 @@ app.use("/api/workspaces", projectRoutes);
 app.use("/api/workspaces", taskRoutes);
 app.use("/api/workspaces", taskCommentRoutes);
 app.use("/api/workspaces", taskActivityRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 module.exports = app;
