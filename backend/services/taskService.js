@@ -4,6 +4,30 @@ const Task = require("../models/Task");
 const WorkspaceMember = require("../models/WorkspaceMember");
 
 const {recordTaskActivity} = require("./taskActivityService");
+const { createNotification } = require("./notificationService");
+
+const notifyTaskAssignee = async ({recipientId,actorId,workspaceId,projectId,taskId,taskTitle,}) => {
+  if (!recipientId ||String(recipientId) === String(actorId)) {
+    return;
+  }
+  try {
+    await createNotification({
+      recipientId,
+      actorId,
+      type: "task_assigned",
+      title: "You were assigned a task",
+      message: `You were assigned "${taskTitle}"`,
+      workspaceId,
+      projectId,
+      taskId,
+    });
+  } catch (error) {
+    console.error(
+      "Task assignment notification error:",
+      error
+    );
+  }
+};
 
 const createTaskInProject = async (data,workspaceId,projectId,userId) => {
   const project = await Project.findOne({
@@ -75,6 +99,15 @@ const createTaskInProject = async (data,workspaceId,projectId,userId) => {
     action: "task_created",
     message: `created task "${task.title}"`,
   });
+
+  await notifyTaskAssignee({
+  recipientId: assigneeId,
+  actorId: userId,
+  workspaceId,
+  projectId,
+  taskId: task._id,
+  taskTitle: task.title,
+});
 
   return {
     status: "created",
@@ -303,6 +336,17 @@ const updateTaskInProject = async (data,workspaceId,projectId,taskId,actorId) =>
       })
     )
   );
+
+  if (oldAssigneeId !== newAssigneeId && newAssigneeId) {
+  await notifyTaskAssignee({
+    recipientId: newAssigneeId,
+    actorId,
+    workspaceId,
+    projectId,
+    taskId: updatedTask._id,
+    taskTitle: updatedTask.title,
+  });
+}
 
   return {
     status: "updated",
