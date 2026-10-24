@@ -55,11 +55,7 @@ function NotificationContent({ notification }) {
   );
 }
 
-function Navbar({
-  variant = "public",
-  onLogout,
-  loggingOut = false,
-}) {
+function Navbar({variant = "public",onLogout,loggingOut = false,}) {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -105,8 +101,6 @@ function Navbar({
     [variant]
   );
 
-  // Load notifications when the dashboard navbar mounts.
-  // Refresh every 30 seconds until we add Socket.IO.
   useEffect(() => {
     if (variant !== "dashboard") return;
 
@@ -121,44 +115,47 @@ function Navbar({
     };
   }, [variant, loadNotifications]);
 
-  const handleNotificationClick = async (notification) => {
-    setIsNotificationsOpen(false);
+  const markNotificationAsRead = async (notification) => {
+  if (notification.readAt) return true;
 
-    // Already-read notifications do not need another API call.
-    if (notification.readAt) return;
+  try {
+    const response = await api.patch(
+      `/notifications/${notification._id}/read`
+    );
 
-    try {
-      const response = await api.patch(
-        `/notifications/${notification._id}/read`
-      );
+    const savedNotification = response.data.notification;
 
-      const savedNotification = response.data.notification;
+    const readAt =
+      savedNotification?.readAt || new Date().toISOString();
 
-      setNotifications((currentNotifications) =>
-        currentNotifications.map((item) =>
-          item._id === notification._id
-            ? {
-                ...item,
-                readAt:
-                  savedNotification?.readAt ||
-                  new Date().toISOString(),
-              }
-            : item
-        )
-      );
+    setNotifications((currentNotifications) =>
+      currentNotifications.map((item) =>
+        item._id === notification._id
+          ? { ...item, readAt }
+          : item
+      )
+    );
+    setUnreadCount((currentCount) =>
+      Math.max(0, currentCount - 1)
+    );
 
-      setUnreadCount((currentCount) =>
-        Math.max(0, currentCount - 1)
-      );
+    setNotificationError("");
+    return true;
+  } catch (error) {
+    setNotificationError(
+      error.response?.data?.message ||
+        "Unable to mark notification as read."
+    );
 
-      setNotificationError("");
-    } catch (error) {
-      setNotificationError(
-        error.response?.data?.message ||
-          "Unable to mark notification as read."
-      );
-    }
-  };
+    return false;
+  }
+};
+
+const handleNotificationClick = async (notification) => {
+  setIsNotificationsOpen(false);
+
+  await markNotificationAsRead(notification);
+};
 
   const handleMarkAllAsRead = async () => {
     try {
@@ -213,7 +210,6 @@ function Navbar({
               )}
             </button>
 
-            {/* Notification dropdown */}
             {isNotificationsOpen && (
               <section
                 aria-label="Notifications"
@@ -287,42 +283,51 @@ function Navbar({
                         );
 
                         return (
-                          <li key={notification._id}>
-                            {destination ? (
-                              <Link
-                                to={destination}
-                                onClick={() =>
-                                  void handleNotificationClick(
-                                    notification
-                                  )
-                                }
-                                className={`block transition hover:bg-slate-50 ${
-                                  !notification.readAt
-                                    ? "bg-indigo-50/40"
-                                    : ""
-                                }`}
-                              >
-                                {content}
-                              </Link>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void handleNotificationClick(
-                                    notification
-                                  )
-                                }
-                                className={`block w-full text-left transition hover:bg-slate-50 ${
-                                  !notification.readAt
-                                    ? "bg-indigo-50/40"
-                                    : ""
-                                }`}
-                              >
-                                {content}
-                              </button>
-                            )}
-                          </li>
-                        );
+                        <li
+                          key={notification._id}
+                          className={`flex items-stretch ${
+                            !notification.readAt ? "bg-indigo-50/40" : ""
+                          }`}
+                        >
+                          {/* Left side: click to open the project */}
+                          {destination ? (
+                            <Link
+                              to={destination}
+                              onClick={() =>
+                                void handleNotificationClick(notification)
+                              }
+                              className="min-w-0 flex-1 transition hover:bg-slate-50"
+                            >
+                              {content}
+                            </Link>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleNotificationClick(notification)
+                              }
+                              className="min-w-0 flex-1 text-left transition hover:bg-slate-50"
+                            >
+                              {content}
+                            </button>
+                          )}
+
+                          {/* Right side: click to mark as read */}
+                          {!notification.readAt && (
+                            <button
+                              type="button"
+                              title="Mark as read"
+                              aria-label={`Mark "${notification.title}" as read`}
+                              onClick={() =>
+                                void markNotificationAsRead(notification)
+                              }
+                              className="m-2 inline-flex h-9 w-9 shrink-0 self-center items-center justify-center rounded-lg text-slate-500 transition hover:bg-indigo-100 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            >
+                              <CheckCheck size={17} />
+                            </button>
+                          )}
+                        </li>
+                      );
                       })}
                     </ul>
                   )}
