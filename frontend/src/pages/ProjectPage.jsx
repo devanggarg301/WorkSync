@@ -1,5 +1,5 @@
 import {useCallback,useEffect,useMemo,useState,} from "react";
-import { Link, useParams } from "react-router-dom";
+import {Link,useLocation,useNavigate,useParams,} from "react-router-dom";
 import {ArrowLeft,Plus,RefreshCw,Search,X,LayoutGrid,List,CalendarDays,ChevronLeft,ChevronRight,} from "lucide-react";
 
 import {DndContext,DragOverlay,KeyboardSensor,PointerSensor,closestCorners,pointerWithin,useSensor,useSensors,
@@ -7,11 +7,13 @@ import {DndContext,DragOverlay,KeyboardSensor,PointerSensor,closestCorners,point
 
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 
+
 import api from "../api/client";
 import KanbanColumn from "../components/KanbanColumn";
 import TaskCard from "../components/TaskCard";
 import CreateTaskModal from "../components/CreateTaskModal";
 import TaskDetailsModal from "../components/TaskDetailsModal";
+
 
 const priorities = [
   { value: "low", label: "Low" },
@@ -138,6 +140,8 @@ const kanbanCollisionDetection = (args) => {
 
 function ProjectPage() {
   const { workspaceId, projectId } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
@@ -228,6 +232,29 @@ const [workspaceMembersError, setWorkspaceMembersError] =useState("");
       controller.abort();
     };
   }, [loadProjectData]);
+
+    useEffect(() => {
+    const requestedTaskId = location.state?.openTaskId;
+    if (!requestedTaskId || loading) {
+      return;
+    }
+    const taskToOpen = tasks.find(
+      (task) =>
+        String(task._id) === String(requestedTaskId)
+    );
+
+    if (taskToOpen) {
+      setSelectedTask(taskToOpen);
+    }
+
+    navigate(
+      `${location.pathname}${location.search}`,
+      {
+        replace: true,
+        state: null,
+      }
+    );
+  }, [location.state,location.pathname,location.search,loading,tasks,navigate]);
   const refreshTasks = useCallback(async () => {
     setRefreshError("");
 

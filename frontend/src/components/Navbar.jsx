@@ -292,14 +292,19 @@ const handleNotificationClick = async (notification) => {
                           {/* Left side: click to open the project */}
                           {destination ? (
                             <Link
-                              to={destination}
-                              onClick={() =>
-                                void handleNotificationClick(notification)
-                              }
-                              className="min-w-0 flex-1 transition hover:bg-slate-50"
-                            >
-                              {content}
-                            </Link>
+                            to={destination}
+                            state={
+                              notification.taskId
+                                ? { openTaskId: notification.taskId }
+                                : undefined
+                            }
+                            onClick={() =>
+                              void handleNotificationClick(notification)
+                            }
+                            className="min-w-0 flex-1 transition hover:bg-slate-50"
+                          >
+                            {content}
+                          </Link>
                           ) : (
                             <button
                               type="button"
